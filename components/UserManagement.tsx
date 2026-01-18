@@ -30,8 +30,9 @@ const UserManagement: React.FC<UserManagementProps> = ({
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState({ username: '', password: '', role: 'Guest' as Role });
   
-  // Factory Reset States
-  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  // Reset States
+  const [showResetDataConfirmModal, setShowResetDataConfirmModal] = useState(false);
+  const [showFactoryResetConfirmModal, setShowFactoryResetConfirmModal] = useState(false);
   const [resetPasswordInput, setResetPasswordInput] = useState('');
   const [resetPasswordError, setResetPasswordError] = useState('');
 
@@ -127,33 +128,51 @@ const UserManagement: React.FC<UserManagementProps> = ({
     setPasswordTarget(null);
   };
 
-  const handleResetAllData = () => {
+  const handleResetData = () => {
+    if (!currentUser || currentUser.role !== 'Admin') {
+      alert("Admin login required for this operation.");
+      return;
+    }
+
+    if (window.confirm("WARNING: This will delete ALL equipment and measurement records permanently. User accounts and system settings will NOT be affected.\n\nAre you sure you want to proceed?")) {
+      setShowResetDataConfirmModal(true);
+      setResetPasswordInput('');
+      setResetPasswordError('');
+    }
+  };
+  
+  const handleFactoryReset = () => {
     if (!currentUser || currentUser.role !== 'Admin') {
       alert("Admin login required for this operation.");
       return;
     }
 
     if (window.confirm("WARNING: This will perform a FACTORY RESET. All equipment, measurement records, custom users, and settings will be permanently deleted and restored to initial defaults.\n\nAre you absolutely sure you want to proceed?")) {
-      setShowResetConfirmModal(true);
-      setResetPasswordInput(''); // Clear previous input
-      setResetPasswordError(''); // Clear previous error
+      setShowFactoryResetConfirmModal(true);
+      setResetPasswordInput('');
+      setResetPasswordError('');
+    }
+  };
+  
+  const confirmDataReset = async () => {
+    if (resetPasswordInput.trim() === currentUser.password) {
+      await supabase.from('readings').delete().neq('id', '0');
+      await supabase.from('equipment').delete().neq('id', '0');
+      setEquipments([]);
+      setReadings([]);
+      alert("All equipment and measurement data has been successfully cleared.");
+      setShowResetDataConfirmModal(false);
+    } else {
+      setResetPasswordError("Incorrect password. Please try again.");
     }
   };
 
   const confirmFactoryReset = async () => {
     if (resetPasswordInput.trim() === currentUser.password) {
-      
-      // Perform DB Truncation
-      // Note: Supabase JS client doesn't have a simple 'truncate' for all tables. 
-      // We delete all rows.
       await supabase.from('readings').delete().neq('id', '0');
       await supabase.from('equipment').delete().neq('id', '0');
-      await supabase.from('user_accounts').delete().neq('id', '0'); // Keep admin
-      
-      // Reset Settings
+      await supabase.from('user_accounts').delete().neq('id', '0');
       await supabase.from('settings').upsert({ id: 1, poorLimit: 300, criticalLimit: 500 });
-
-      // Re-insert Admin if deleted (safety check, although neq id 0 usually handles it if admin id is 0)
       const { error } = await supabase.from('user_accounts').upsert(defaultAdmin);
 
       if (error) {
@@ -163,14 +182,15 @@ const UserManagement: React.FC<UserManagementProps> = ({
       setEquipments([]);
       setReadings([]);
       setSettings(initialThreshold);
-      setUsers([defaultAdmin]); // Reset users to only the default admin
-      setCurrentUser(defaultAdmin); // Log in as the default admin
+      setUsers([defaultAdmin]);
+      setCurrentUser(defaultAdmin);
       alert("Factory reset complete. All data cleared and settings restored to default.");
-      setShowResetConfirmModal(false);
+      setShowFactoryResetConfirmModal(false);
     } else {
       setResetPasswordError("Incorrect password. Please try again.");
     }
   };
+
 
   return (
     <div className="space-y-6">
@@ -350,68 +370,76 @@ const UserManagement: React.FC<UserManagementProps> = ({
         </table>
       </div>
       
-      {/* Factory Reset Button */}
+      {/* Danger Zone */}
       {currentUser && currentUser.role === 'Admin' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-center mt-6">
-          <h3 className="text-lg font-bold text-rose-700 mb-4">Danger Zone</h3>
-          <p className="text-sm text-slate-600 mb-6 max-w-lg mx-auto">
-            This action will completely wipe all application data, including equipment, measurements,
-            and user accounts (except the default admin). All settings will be reverted to factory defaults.
-            This action is irreversible.
-          </p>
-          <button
-            onClick={handleResetAllData}
-            className="bg-rose-600 hover:bg-rose-700 text-white px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 transition-all active:scale-95 mx-auto"
-          >
-            <Wrench size={20} /> Perform Factory Reset
-          </button>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mt-6">
+          <h3 className="text-lg font-bold text-rose-700 mb-4 text-center">Danger Zone</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <h4 className="font-bold text-amber-800">Reset Measurement Data</h4>
+              <p className="text-xs text-amber-700 mt-1 mb-3">Permanently delete all equipment and reading records. User accounts and system settings will be preserved.</p>
+              <button
+                onClick={handleResetData}
+                className="w-full bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-amber-500/30 transition-all active:scale-95"
+              >
+                <Trash2 size={14} /> Reset Data Only
+              </button>
+            </div>
+            <div className="bg-rose-50 border border-rose-200 rounded-xl p-4">
+              <h4 className="font-bold text-rose-800">Factory Reset</h4>
+              <p className="text-xs text-rose-700 mt-1 mb-3">Delete ALL data including users, equipment, readings, and settings. Restores system to its initial state.</p>
+              <button
+                onClick={handleFactoryReset}
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-rose-500/30 transition-all active:scale-95"
+              >
+                <Wrench size={14} /> Full Factory Reset
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Password Confirmation Modal for Factory Reset */}
-      {showResetConfirmModal && (
+      {/* Confirmation Modals */}
+      {showResetDataConfirmModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="text-lg font-bold text-amber-800">Confirm Data Reset</h3>
+              <button onClick={() => setShowResetDataConfirmModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-slate-600">To confirm you want to delete all equipment and readings, please enter your administrator password. This action is irreversible.</p>
+              {resetPasswordError && <div className="p-3 bg-red-500/20 border border-red-500/30 text-red-400 text-sm rounded-lg text-center font-medium">{resetPasswordError}</div>}
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Admin Password</label>
+                <input type="password" autoFocus required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-amber-500 outline-none" value={resetPasswordInput} onChange={e => setResetPasswordInput(e.target.value)} onKeyPress={(e) => { if (e.key === 'Enter') confirmDataReset(); }}/>
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button onClick={confirmDataReset} className="flex-1 bg-amber-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-amber-500/30 hover:bg-amber-700 transition-all">Confirm Data Reset</button>
+                <button type="button" onClick={() => setShowResetDataConfirmModal(false)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFactoryResetConfirmModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <h3 className="text-lg font-bold text-rose-800">Confirm Factory Reset</h3>
-              <button onClick={() => setShowResetConfirmModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
+              <button onClick={() => setShowFactoryResetConfirmModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-sm text-slate-600">
-                To confirm the factory reset and delete all data, please enter your administrator password.
-                This action is irreversible.
-              </p>
-              {resetPasswordError && (
-                <div className="p-3 bg-red-500/20 border border-red-500/30 text-red-400 text-sm rounded-lg text-center font-medium">
-                  {resetPasswordError}
-                </div>
-              )}
+              <p className="text-sm text-slate-600">To confirm the factory reset and delete all data, please enter your administrator password. This action is irreversible.</p>
+              {resetPasswordError && <div className="p-3 bg-red-500/20 border border-red-500/30 text-red-400 text-sm rounded-lg text-center font-medium">{resetPasswordError}</div>}
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Admin Password</label>
-                <input 
-                  type="password"
-                  autoFocus
-                  required
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-rose-500 outline-none"
-                  value={resetPasswordInput}
-                  onChange={e => setResetPasswordInput(e.target.value)}
-                  onKeyPress={(e) => { if (e.key === 'Enter') confirmFactoryReset(); }}
-                />
+                <input type="password" autoFocus required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-rose-500 outline-none" value={resetPasswordInput} onChange={e => setResetPasswordInput(e.target.value)} onKeyPress={(e) => { if (e.key === 'Enter') confirmFactoryReset(); }}/>
               </div>
               <div className="flex gap-3 pt-4">
-                <button 
-                  onClick={confirmFactoryReset}
-                  className="flex-1 bg-rose-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-rose-500/30 hover:bg-rose-700 transition-all"
-                >
-                  Confirm Reset
-                </button>
-                <button 
-                  type="button" 
-                  onClick={() => setShowResetConfirmModal(false)} 
-                  className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors"
-                >
-                  Cancel
-                </button>
+                <button onClick={confirmFactoryReset} className="flex-1 bg-rose-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-rose-500/30 hover:bg-rose-700 transition-all">Confirm Reset</button>
+                <button type="button" onClick={() => setShowFactoryResetConfirmModal(false)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors">Cancel</button>
               </div>
             </div>
           </div>
