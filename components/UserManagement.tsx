@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { UserPlus, Trash2, Shield, User, X, Wrench, Hammer, Lock, Key, Check } from 'lucide-react';
+import { UserPlus, Trash2, Shield, User, X, Wrench, Hammer } from 'lucide-react';
 import { UserAccount, Role, Equipment, Reading, ThresholdSettings } from '../types';
 
 interface UserManagementProps {
@@ -27,8 +27,6 @@ const UserManagement: React.FC<UserManagementProps> = ({
   defaultAdmin
 }) => {
   const [isAdding, setIsAdding] = useState(false);
-  const [editingPasswordUser, setEditingPasswordUser] = useState<UserAccount | null>(null);
-  const [newPassword, setNewPassword] = useState('');
   const [formData, setFormData] = useState({ username: '', password: '', role: 'Guest' as Role });
   const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
   const [resetPasswordInput, setResetPasswordInput] = useState('');
@@ -47,30 +45,6 @@ const UserManagement: React.FC<UserManagementProps> = ({
     setUsers([...users, newUser]);
     setIsAdding(false);
     setFormData({ username: '', password: '', role: 'Guest' });
-  };
-
-  const handleUpdatePassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingPasswordUser) return;
-    if (!newPassword.trim()) {
-      alert("Password cannot be empty.");
-      return;
-    }
-
-    const updatedUsers = users.map(u => 
-      u.id === editingPasswordUser.id ? { ...u, password: newPassword } : u
-    );
-    
-    setUsers(updatedUsers);
-
-    // If the admin is changing their own password, update the current session user
-    if (editingPasswordUser.id === currentUser.id) {
-      setCurrentUser({ ...currentUser, password: newPassword });
-    }
-
-    alert(`Password for ${editingPasswordUser.username} has been successfully updated.`);
-    setEditingPasswordUser(null);
-    setNewPassword('');
   };
 
   const handleDeleteUser = (id: string) => {
@@ -130,7 +104,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
       </div>
 
       {isAdding && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <h3 className="text-lg font-bold text-slate-800">New User Account</h3>
@@ -181,44 +155,6 @@ const UserManagement: React.FC<UserManagementProps> = ({
         </div>
       )}
 
-      {editingPasswordUser && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <Key size={18} className="text-blue-600" /> Change Password
-              </h3>
-              <button onClick={() => setEditingPasswordUser(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
-            </div>
-            <form onSubmit={handleUpdatePassword} className="p-6 space-y-4">
-              <p className="text-sm text-slate-600 mb-4">
-                Updating credentials for <span className="font-bold text-slate-800">{editingPasswordUser.username}</span>.
-              </p>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">New Password</label>
-                <input 
-                  type="password"
-                  autoFocus
-                  required
-                  placeholder="Enter new strong password"
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                  value={newPassword}
-                  onChange={e => setNewPassword(e.target.value)}
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button type="submit" className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
-                  <Check size={18} /> Update Password
-                </button>
-                <button type="button" onClick={() => setEditingPasswordUser(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors">
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[11px] tracking-wider border-b border-slate-200">
@@ -252,23 +188,13 @@ const UserManagement: React.FC<UserManagementProps> = ({
                 </td>
                 <td className="px-6 py-4 text-emerald-600 font-medium">Active</td>
                 <td className="px-6 py-4 text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <button 
-                      onClick={() => setEditingPasswordUser(u)}
-                      className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Change Password"
-                    >
-                      <Lock size={16} />
-                    </button>
-                    <button 
-                      disabled={u.username === defaultAdmin.username} // Prevent deleting the initial default admin
-                      onClick={() => handleDeleteUser(u.id)}
-                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                      title="Delete User"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
+                  <button 
+                    disabled={u.username === defaultAdmin.username} // Prevent deleting the initial default admin
+                    onClick={() => handleDeleteUser(u.id)}
+                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </td>
               </tr>
             ))}
@@ -296,7 +222,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
 
       {/* Password Confirmation Modal for Factory Reset */}
       {showResetConfirmModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <h3 className="text-lg font-bold text-rose-800">Confirm Factory Reset</h3>

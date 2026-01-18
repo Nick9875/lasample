@@ -14,20 +14,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, isAd
 
   const handleSave = () => {
     if (!isAdmin) return alert("Admin login required to change system limits.");
-    
-    // Defensive check to ensure we don't save NaN
-    const poor = parseFloat(String(local.poorLimit));
-    const critical = parseFloat(String(local.criticalLimit));
-    
-    if (isNaN(poor) || isNaN(critical)) {
-      alert("Invalid threshold values. Please enter valid numbers.");
-      return;
-    }
-
-    setSettings({
-      poorLimit: poor,
-      criticalLimit: critical
-    });
+    setSettings(local);
     alert("Settings updated successfully!");
   };
 
@@ -67,7 +54,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, isAd
               disabled={!isAdmin}
               type="number"
               className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-lg focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all disabled:opacity-50"
-              value={isNaN(local.poorLimit) ? '' : local.poorLimit}
+              value={local.poorLimit}
               onChange={e => setLocal({...local, poorLimit: parseFloat(e.target.value)})}
             />
             <p className="text-xs text-slate-400 mt-2 italic">Readings above this but below critical will be flagged as 'Poor'.</p>
@@ -82,7 +69,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, isAd
               disabled={!isAdmin}
               type="number"
               className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-lg focus:ring-2 focus:ring-rose-500 focus:outline-none transition-all disabled:opacity-50"
-              value={isNaN(local.criticalLimit) ? '' : local.criticalLimit}
+              value={local.criticalLimit}
               onChange={e => setLocal({...local, criticalLimit: parseFloat(e.target.value)})}
             />
             <p className="text-xs text-slate-400 mt-2 italic">Readings above this value indicate severe leakage or potential failure.</p>
@@ -101,15 +88,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, isAd
       <div className="grid grid-cols-3 gap-4">
         <div className="text-center p-4 bg-emerald-50 rounded-xl border border-emerald-100">
            <div className="text-[10px] font-bold text-emerald-600 uppercase mb-1">Satisfactory</div>
-           <div className="text-xs text-emerald-800">Below {isNaN(local.poorLimit) ? settings.poorLimit : local.poorLimit} uA</div>
+           <div className="text-xs text-emerald-800">Below {local.poorLimit} uA</div>
         </div>
         <div className="text-center p-4 bg-amber-50 rounded-xl border border-amber-100">
            <div className="text-[10px] font-bold text-amber-600 uppercase mb-1">Poor</div>
-           <div className="text-xs text-amber-800">{isNaN(local.poorLimit) ? settings.poorLimit : local.poorLimit} - {isNaN(local.criticalLimit) ? settings.criticalLimit : local.criticalLimit} uA</div>
+           <div className="text-xs text-amber-800">{local.poorLimit} - {local.criticalLimit} uA</div>
         </div>
         <div className="text-center p-4 bg-rose-50 rounded-xl border border-rose-100">
            <div className="text-[10px] font-bold text-rose-600 uppercase mb-1">Critical</div>
-           <div className="text-xs text-rose-800">Above {isNaN(local.criticalLimit) ? settings.criticalLimit : local.criticalLimit} uA</div>
+           <div className="text-xs text-rose-800">Above {local.criticalLimit} uA</div>
         </div>
       </div>
     </div>

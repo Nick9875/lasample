@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useRef } from 'react';
 import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2 } from 'lucide-react';
 import { Equipment, Reading } from '../types';
@@ -85,13 +84,11 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
   };
 
   const handleBulkSubmit = () => {
-    // Fix: Explicitly type entries to allow property access on 'vals'
-    const entries = Object.entries(bulkInputs).filter(([_key, vals]: [string, any]) => vals.total || vals.resistive || vals.corrected);
+    const entries = Object.entries(bulkInputs).filter(([_key, vals]) => vals.total || vals.resistive || vals.corrected);
     if (entries.length === 0) return alert("No measurement data entered.");
 
     const batchReadings: Reading[] = [];
-    // Fix: Explicitly type forEach parameters
-    entries.forEach(([eqId, vals]: [string, any]) => {
+    entries.forEach(([eqId, vals]) => {
       const eq = equipments.find(e => e.id === eqId);
       if (eq) {
         batchReadings.push({
@@ -309,7 +306,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
             </button>
             <button 
               onClick={() => setActiveTab('bulk')} 
-              className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'bulk' ? 'bg-white text-blue-600 shadow-sm' : 'text-blue-600 shadow-sm' && activeTab === 'bulk' ? 'bg-white text-blue-600' : 'text-blue-50 hover:bg-blue-400/20'}`}
+              className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'bulk' ? 'bg-white text-blue-600 shadow-sm' : 'text-blue-50 hover:bg-blue-400/20'}`}
             >
               Batch
             </button>

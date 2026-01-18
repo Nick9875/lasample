@@ -3,7 +3,6 @@ import React, { useState, useMemo } from 'react';
 import { ShieldAlert, Sparkles, Brain, Loader2, Thermometer, ShieldCheck, ArrowRightLeft, Search, CheckCircle2, X, Filter } from 'lucide-react';
 import { Equipment, Reading, ThresholdSettings, HealthStatus } from '../types';
 import { performAIDiagnostic, performAIComparison } from '../services/geminiService';
-import { calculateHealthStatus } from '../utils/health';
 
 interface AIDiagnosticsProps {
   equipments: Equipment[];
@@ -33,10 +32,20 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
     'Unknown': 'text-slate-400 bg-slate-50 border-slate-200'
   };
 
+  const getStatus = (eq: Equipment, latest?: Reading): HealthStatus => {
+    if (eq.statusOverride) return eq.statusOverride as HealthStatus;
+    if (!latest) return 'Satisfactory';
+    const val = Number(latest.correctedResistiveCurrent);
+    if (val === 0) return 'Probe Failure';
+    if (val > settings.criticalLimit) return 'Critical';
+    if (val > settings.poorLimit) return 'Poor';
+    return 'Satisfactory';
+  };
+
   const equipmentsWithStatus = useMemo(() => {
     return equipments.map(eq => {
       const latest = readings.filter(r => r.equipmentId === eq.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-      const status = calculateHealthStatus(eq, latest, settings);
+      const status = getStatus(eq, latest);
       return { ...eq, status, latestVal: latest?.correctedResistiveCurrent };
     });
   }, [equipments, readings, settings]);
@@ -70,7 +79,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
     } else if (filterVoltage !== 'All') {
       // Apply manual filter if no selection yet
       const v = parseFloat(filterVoltage);
-      list = list.filter(e => !isNaN(v) && e.ratedVoltage === v);
+      list = list.filter(e => e.ratedVoltage === v);
     }
 
     // 3. Filter by Status
@@ -83,7 +92,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
   }, [equipmentsWithStatus, compareSearch, compareIds, filterVoltage, filterStatus]);
 
   const voltageStats = useMemo(() => {
-    const uniqueRatedVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: any, b: any) => a - b);
+    const uniqueRatedVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a,b) => a-b);
     
     return uniqueRatedVoltages.map(ratedKV => {
       const eqAtRatedKV = equipmentsWithStatus.filter(e => e.ratedVoltage === ratedKV);
@@ -99,7 +108,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
   }, [equipments, equipmentsWithStatus]);
 
   const uniqueVoltages = useMemo(() => {
-    return Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: any, b: any) => a - b);
+    return Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a, b) => a - b);
   }, [equipments]);
 
   const handleRunDiagnostic = async () => {
@@ -157,6 +166,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
         </div>
       </div>
 
+      {/* Rated kV Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {voltageStats.map(stat => (
           <div key={stat.ratedKV} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
@@ -177,6 +187,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
             </div>
             <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
                <div className="h-2 flex-1 bg-slate-100 rounded-full overflow-hidden flex">
+                  {/* Fix: Explicitly cast values to Number for arithmetic operations */}
                   <div style={{width: `${Number(stat.total) > 0 ? (Number(stat.satisfactory)/Number(stat.total))*100 : 0}%`}} className="bg-emerald-500 h-full"></div>
                   <div style={{width: `${Number(stat.total) > 0 ? (Number(stat.poor)/Number(stat.total))*100 : 0}%`}} className="bg-amber-500 h-full"></div>
                   <div style={{width: `${Number(stat.total) > 0 ? (Number(stat.critical)/Number(stat.total))*100 : 0}%`}} className="bg-rose-500 h-full"></div>
@@ -188,6 +199,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Selection Pane */}
         <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 flex flex-col h-[700px]">
           <div className="flex items-center gap-2 mb-2 p-1 bg-slate-100 rounded-xl">
             <button 
@@ -207,8 +219,11 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
           <div className="flex-1 overflow-hidden flex flex-col">
             {mode === 'single' ? (
               <>
-                <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-2">Vulnerable Equipment</h3>
+                <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-2">
+                  Vulnerable Equipment
+                </h3>
                 <p className="text-xs text-slate-500 mb-4">Select an arrester identified as 'Poor' or 'Critical' for deep AI diagnostic.</p>
+                
                 <div className="flex-1 space-y-2 overflow-y-auto no-scrollbar pr-1">
                   {unhealthyEquipments.map(eq => (
                     <button 
@@ -221,7 +236,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
                           <div className={`font-bold text-sm ${selectedId === eq.id ? 'text-white' : 'text-slate-800'}`}>{eq.name}</div>
                           <div className={`text-[10px] uppercase font-bold tracking-widest mt-1 ${selectedId === eq.id ? 'text-blue-200' : 'text-slate-400'}`}>{eq.substation}</div>
                         </div>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${selectedId === eq.id ? 'bg-white/20 text-white' : statusColors[eq.status]}`}>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${selectedId === eq.id ? 'bg-white/20 text-white' : statusColors[eq.status].replace('bg-', 'bg-').split(' ')[0] + ' ' + statusColors[eq.status].split(' ')[0]}`}>
                           {eq.status}
                         </span>
                       </div>
@@ -237,7 +252,11 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
               </>
             ) : (
               <>
-                <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-2">Select Units to Compare</h3>
+                <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-2">
+                  Select Units to Compare
+                </h3>
+                
+                {/* Search & Filters */}
                 <div className="space-y-3 mb-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
@@ -254,7 +273,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
                       className="w-full px-2 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none"
                       value={filterVoltage}
                       onChange={e => setFilterVoltage(e.target.value)}
-                      disabled={compareIds.length > 0}
+                      disabled={compareIds.length > 0} // Lock filter when items are selected
                     >
                       <option value="All">All Voltages</option>
                       {uniqueVoltages.map(v => <option key={v} value={v}>{v} kV</option>)}
@@ -272,6 +291,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
                     </select>
                   </div>
                 </div>
+                
                 {compareIds.length > 0 && (
                    <div className="flex flex-wrap gap-2 mb-3 bg-blue-50 p-2 rounded-xl border border-blue-100 animate-in fade-in zoom-in-95">
                       {compareIds.map(id => {
@@ -287,6 +307,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
                       </div>
                    </div>
                 )}
+
                 <div className="flex-1 space-y-2 overflow-y-auto no-scrollbar pr-1">
                   {availableForComparison.map(eq => {
                     const isSelected = compareIds.includes(eq.id);
@@ -311,6 +332,12 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
                       </button>
                     );
                   })}
+                  {availableForComparison.length === 0 && (
+                     <div className="text-center py-8">
+                       <Filter size={24} className="mx-auto text-slate-300 mb-2" />
+                       <div className="text-xs text-slate-400 italic">No equipment matches filters.</div>
+                     </div>
+                  )}
                 </div>
               </>
             )}
@@ -326,6 +353,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
           </button>
         </div>
 
+        {/* Report Output */}
         <div className="lg:col-span-2 bg-slate-50 rounded-2xl border border-slate-200 border-dashed p-8 relative min-h-[500px] flex flex-col items-center justify-center text-center">
           {isLoading ? (
             <div className="space-y-4">
