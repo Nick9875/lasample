@@ -154,23 +154,26 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
 
   const handleResolveAlarm = (eqId: string, resolution: HealthStatus) => {
     if (!isAdmin) return alert("Admin access required.");
-    setEquipments(prev => prev.map(e => e.id === eqId ? { ...e, statusOverride: resolution } : e));
     const eq = equipments.find(e => e.id === eqId);
+    if (!eq) return;
+
     const latest = getLatestReading(eqId);
-    if (eq) {
-        const newReading: Reading = {
-            id: `action-${Date.now()}`,
-            equipmentId: eq.id,
-            date: new Date().toISOString().split('T')[0],
-            totalCurrent: resolution === 'De-energized' ? 0 : (latest?.totalCurrent || 0),
-            resistiveCurrent: resolution === 'De-energized' ? 0 : (latest?.resistiveCurrent || 0),
-            correctedResistiveCurrent: resolution === 'De-energized' ? 0 : (latest?.correctedResistiveCurrent || 0),
-            mcovRating: eq.mcovRating,
-            ratedVoltage: eq.ratedVoltage,
-            notes: `Action Taken: Classified as ${resolution}`
-        };
-        setReadings(prev => [newReading, ...prev]);
-    }
+    const originalStatus = calculateHealthStatus(eq, latest, settings);
+
+    setEquipments(prev => prev.map(e => e.id === eqId ? { ...e, statusOverride: resolution } : e));
+
+    const newActionReading: Reading = {
+        id: `action-${Date.now()}`,
+        equipmentId: eq.id,
+        date: new Date().toISOString().split('T')[0],
+        totalCurrent: 0,
+        resistiveCurrent: 0,
+        correctedResistiveCurrent: -1, // Mark as non-data action log
+        mcovRating: eq.mcovRating,
+        ratedVoltage: eq.ratedVoltage,
+        notes: `Action Taken: Classified as '${resolution}'. Original status was '${originalStatus}'.`
+    };
+    setReadings(prev => [newActionReading, ...prev]);
     setActiveResolutionId(null);
   };
 

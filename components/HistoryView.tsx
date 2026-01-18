@@ -47,7 +47,22 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
       const eqStatus = calculateHealthStatus(eq, latest, settings);
       const searchString = `${eq.name} ${eq.substation} ${eq.district} ${eq.voltageLevel}`.toLowerCase();
       const matchesSearch = searchString.includes(searchTerm.toLowerCase());
-      let matchesStatus = statusFilter === 'All' || (statusFilter === 'Overridden' ? !!eq.statusOverride : eqStatus === statusFilter);
+      
+      let matchesStatus;
+      switch (statusFilter) {
+        case 'All':
+          matchesStatus = true;
+          break;
+        case 'Overridden':
+          matchesStatus = !!eq.statusOverride;
+          break;
+        case 'Action Log':
+          matchesStatus = readings.some(r => r.equipmentId === eq.id && r.notes?.startsWith('Action Taken:'));
+          break;
+        default:
+          matchesStatus = eqStatus === statusFilter;
+      }
+
       const matchesRatedKV = ratedKVFilter === 'All' || eq.ratedVoltage === ratedKVFilter;
       return matchesSearch && matchesStatus && matchesRatedKV;
     })
@@ -60,8 +75,30 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
 
   const handleResetOverride = (eqId: string) => {
     if (!isAdmin) return alert("Unauthorized access.");
-    if (confirm("Reset override to automatic detection?")) {
+    if (confirm("Reset override to automatic detection? This action will be logged.")) {
+        // Collapse the card to provide a visual refresh effect
+        setExpandedId(null);
+
         setEquipments(prev => prev.map(e => e.id === eqId ? { ...e, statusOverride: null } : e));
+        
+        const eq = equipments.find(e => e.id === eqId);
+        if (eq) {
+            const newActionReading: Reading = {
+                id: `action-${Date.now()}`,
+                equipmentId: eq.id,
+                date: new Date().toISOString().split('T')[0],
+                totalCurrent: 0,
+                resistiveCurrent: 0,
+                correctedResistiveCurrent: -1, 
+                mcovRating: eq.mcovRating,
+                ratedVoltage: eq.ratedVoltage,
+                notes: `Action Taken: Override reset to automatic detection.`
+            };
+            setReadings(prev => [newActionReading, ...prev]);
+        }
+        
+        // Re-expand the card after a short delay so user sees the updated state
+        setTimeout(() => setExpandedId(eqId), 100);
     }
   };
 
@@ -80,6 +117,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
             <option value="Critical">Critical</option>
             <option value="Probe Failure">Probe Failure</option>
             <option value="Overridden">Overridden</option>
+            <option value="Action Log">Classification &amp; Override Events</option>
           </select>
         </div>
       </div>
@@ -104,6 +142,19 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
               </div>
               {isExpanded && (
                 <div className="bg-slate-50 border-t border-slate-100 p-6 space-y-4">
+                  {eq.statusOverride && (
+                    <div className="bg-blue-100 border border-blue-200 text-blue-800 text-xs font-bold p-3 rounded-xl flex items-center justify-between animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                        <ShieldAlert size={16} />
+                        <span>Status is manually overridden to: {eq.statusOverride}</span>
+                        </div>
+                        {isAdmin && (
+                        <button onClick={() => handleResetOverride(eq.id)} className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg text-blue-700 hover:bg-blue-50 shadow-sm border border-blue-200">
+                            <RotateCcw size={12} /> Reset to Automatic
+                        </button>
+                        )}
+                    </div>
+                  )}
                   <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-slate-100 text-slate-500 font-bold uppercase text-[9px]">
@@ -111,6 +162,25 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {eqReadings.map(r => {
+                          const isActionLog = r.notes?.startsWith('Action Taken:');
+                          
+                          if (isActionLog) {
+                            return (
+                              <tr key={r.id} className="bg-blue-50/50 hover:bg-blue-100/50 transition-colors">
+                                <td className="px-3 py-3 font-medium text-slate-500">{formatDisplayDate(r.date)}</td>
+                                <td colSpan={3} className="px-3 py-3 text-blue-800 font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <ShieldAlert size={14} />
+                                    <span>{r.notes}</span>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3 text-right">
+                                  {isAdmin && <button onClick={() => { if(confirm("Delete this log entry?")) setReadings(prev => prev.filter(rd => rd.id !== r.id)); }} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 size={12} /></button>}
+                                </td>
+                              </tr>
+                            );
+                          }
+                          
                           const readingStatus = calculateHealthStatus(eq, r, settings);
                           return (
                             <tr key={r.id} className="hover:bg-slate-50 transition-colors">
