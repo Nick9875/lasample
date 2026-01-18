@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { Equipment, Reading, ThresholdSettings, HealthStatus } from '../types';
 import { formatDisplayDate } from '../utils/reports';
+import { calculateHealthStatus, isAtRisk } from '../utils/health';
 
 interface DashboardProps {
   equipments: Equipment[];
@@ -56,16 +57,6 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
     showCorrected: true 
   });
 
-  const getStatus = (eq: Equipment, latest?: Reading): HealthStatus => {
-    if (eq.statusOverride) return eq.statusOverride as HealthStatus;
-    if (!latest) return 'Satisfactory';
-    const val = Number(latest.correctedResistiveCurrent); // Ensure val is number for comparison
-    if (val === 0) return 'Probe Failure'; // Assuming 0 implies failure
-    if (val > settings.criticalLimit) return 'Critical';
-    if (val > settings.poorLimit) return 'Poor';
-    return 'Satisfactory';
-  };
-
   const getLatestReading = (eqId: string) => {
     return readings.filter(r => r.equipmentId === eqId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
   };
@@ -73,15 +64,13 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
   const dashboardData = useMemo(() => {
     return equipments.map(eq => {
       const latest = getLatestReading(eq.id);
-      const status = getStatus(eq, latest);
+      const status = calculateHealthStatus(eq, latest, settings);
       return { ...eq, latest, status };
     });
   }, [equipments, readings, settings]);
 
   const statsByRatedKV = useMemo(() => {
-    // Fix: Explicitly cast sorting parameters to any to avoid "unknown" arithmetic errors
     const uniqueRatings = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: any, b: any) => a - b);
-    
     const displayRatings = uniqueRatings.length > 0 ? uniqueRatings : [13.8, 69, 115, 230, 500];
 
     return displayRatings.map(kv => {
@@ -103,7 +92,6 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
   }, [dashboardData, equipments]);
 
   const stats = useMemo(() => {
-    const atRiskCount = dashboardData.filter(d => ['Poor', 'Critical', 'Probe Failure'].includes(d.status)).length;
     return {
       total: dashboardData.length,
       satisfactory: dashboardData.filter(d => d.status === 'Satisfactory').length,
@@ -112,12 +100,12 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
       probeFail: dashboardData.filter(d => d.status === 'Probe Failure').length,
       grounding: dashboardData.filter(d => d.status === 'Correction of Grounding').length,
       deEnergized: dashboardData.filter(d => d.status === 'De-energized').length,
-      atRisk: atRiskCount,
+      atRisk: dashboardData.filter(d => isAtRisk(d.status)).length,
     };
   }, [dashboardData]);
 
   const alarms = useMemo(() => {
-    return dashboardData.filter(d => ['Poor', 'Critical', 'Probe Failure'].includes(d.status));
+    return dashboardData.filter(d => isAtRisk(d.status));
   }, [dashboardData]);
 
   const tableItems = useMemo(() => {
@@ -130,16 +118,15 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
         
         let matchesStatus = true;
         if (tableStatusFilter === 'At Risk') {
-          matchesStatus = ['Poor', 'Critical', 'Probe Failure'].includes(item.status);
+          matchesStatus = isAtRisk(item.status);
         } else if (tableStatusFilter !== 'All') {
           matchesStatus = item.status === tableStatusFilter;
         }
 
         const matchesKV = tableRatedKVFilter === 'All' || item.ratedVoltage === tableRatedKVFilter;
-        
         return matchesSearch && matchesStatus && matchesKV;
       })
-      .slice(0, 6);
+      .slice(0, 10);
   }, [dashboardData, tableSearch, tableStatusFilter, tableRatedKVFilter]);
 
   const toggleTrendSelection = (id: string) => {
@@ -152,10 +139,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
 
   const handleTrendLink = (id: string) => {
     setSelectedTrendIds([id]);
-    const element = document.getElementById('trend-analysis-section');
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    document.getElementById('trend-analysis-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   const statusColors: Record<HealthStatus | 'All' | 'At Risk' | string, string> = {
@@ -169,21 +153,15 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
   };
 
   const handleResolveAlarm = (eqId: string, resolution: HealthStatus) => {
-    if (!isAdmin) return alert("Admin access required to classify alarms.");
-    
-    // 1. Update Equipment Status Override
+    if (!isAdmin) return alert("Admin access required.");
     setEquipments(prev => prev.map(e => e.id === eqId ? { ...e, statusOverride: resolution } : e));
-    
-    // 2. Add History Record (Action Taken)
     const eq = equipments.find(e => e.id === eqId);
     const latest = getLatestReading(eqId);
-    
     if (eq) {
         const newReading: Reading = {
             id: `action-${Date.now()}`,
             equipmentId: eq.id,
             date: new Date().toISOString().split('T')[0],
-            // If de-energized, we assume 0 current, otherwise keep latest measurement for record but note the override
             totalCurrent: resolution === 'De-energized' ? 0 : (latest?.totalCurrent || 0),
             resistiveCurrent: resolution === 'De-energized' ? 0 : (latest?.resistiveCurrent || 0),
             correctedResistiveCurrent: resolution === 'De-energized' ? 0 : (latest?.correctedResistiveCurrent || 0),
@@ -193,16 +171,13 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
         };
         setReadings(prev => [newReading, ...prev]);
     }
-    
     setActiveResolutionId(null);
   };
 
   const chartData = useMemo(() => {
     if (selectedTrendIds.length === 0) return [];
     const selectedReadings = readings.filter(r => selectedTrendIds.includes(r.equipmentId));
-    // Fix: Cast Array.from result to string[] to resolve "unknown" type error in .map callback
     const dates = Array.from(new Set(selectedReadings.map(r => r.date))).sort() as string[];
-    
     return dates.map(date => {
       const entry: Record<string, any> = { date: formatDisplayDate(date) }; 
       selectedTrendIds.forEach(id => {
@@ -230,7 +205,6 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
 
   return (
     <div className="space-y-6">
-      {/* Rated kV Summary Cards */}
       <div className="flex overflow-x-auto gap-4 pb-2 no-scrollbar">
         {statsByRatedKV.map(v => (
           <div key={v.ratedKV} className="flex-none w-56 bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col">
@@ -239,29 +213,19 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Units: {v.total}</span>
             </div>
             <div className="flex gap-1 h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3">
-              {/* Explicitly cast values to Number for arithmetic operations */}
               <div style={{width: `${Number(v.total) > 0 ? (Number(v.Satisfactory)/Number(v.total))*100 : 0}%`}} className="bg-emerald-500 h-full"></div>
               <div style={{width: `${Number(v.total) > 0 ? (Number(v.AtRisk)/Number(v.total))*100 : 0}%`}} className="bg-orange-500 h-full"></div>
             </div>
             <div className="grid grid-cols-3 gap-1 border-t border-slate-50 pt-3 flex-1">
-              <button 
-                onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('Poor'); }} 
-                className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1"
-              >
+              <button onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('Poor'); }} className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1">
                 <div className="text-[9px] font-bold text-slate-400 uppercase group-hover:text-amber-500">Poor</div>
                 <div className="text-xs font-bold text-amber-600">{v.Poor}</div>
               </button>
-              <button 
-                onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('Critical'); }} 
-                className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1"
-              >
+              <button onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('Critical'); }} className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1">
                 <div className="text-[9px] font-bold text-slate-400 uppercase group-hover:text-rose-500">Critical</div>
                 <div className="text-xs font-bold text-rose-600">{v.Critical}</div>
               </button>
-              <button 
-                onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('At Risk'); }} 
-                className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1"
-              >
+              <button onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('At Risk'); }} className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1">
                 <div className="text-[9px] font-bold text-slate-400 uppercase group-hover:text-orange-500">At Risk</div>
                 <div className="text-xs font-bold text-orange-600">{v.AtRisk}</div>
               </button>
@@ -270,7 +234,6 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
         ))}
       </div>
 
-      {/* Global Status Counters */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         {statItems.map((stat) => (
           <button 
@@ -287,7 +250,6 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
         ))}
       </div>
       
-      {/* Active Alarms Feed */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
@@ -301,20 +263,13 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
                 <div className={`p-2 rounded-xl ${a.status === 'Critical' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
                   <AlertCircle size={18} />
                 </div>
-                <div className="flex items-center gap-1">
-                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusColors[a.status]}`}>
-                     {a.status}
-                   </span>
-                </div>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusColors[a.status]}`}>
+                  {a.status}
+                </span>
               </div>
               <div className="mb-4">
-                <button 
-                  onClick={() => handleTrendLink(a.id)}
-                  className="w-full text-left font-bold text-slate-800 text-sm truncate hover:text-blue-600 transition-colors flex items-center gap-2 group"
-                  title="Click to view trend analysis"
-                >
-                  {a.name}
-                  <TrendingUp size={14} className="opacity-0 group-hover:opacity-100 text-blue-500 transition-opacity" />
+                <button onClick={() => handleTrendLink(a.id)} className="w-full text-left font-bold text-slate-800 text-sm truncate hover:text-blue-600 transition-colors flex items-center gap-2 group">
+                  {a.name} <TrendingUp size={14} className="opacity-0 group-hover:opacity-100 text-blue-500 transition-opacity" />
                 </button>
                 <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">{a.substation} • {a.district}</p>
                 <div className="mt-2 flex items-center justify-between text-[10px] font-bold">
@@ -322,33 +277,18 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
                   <span className="text-rose-600 font-bold">{a.latest?.correctedResistiveCurrent || 0} uA</span>
                 </div>
               </div>
-              
               <div className="pt-3 border-t border-slate-100">
-                <button 
-                  onClick={() => setActiveResolutionId(activeResolutionId === a.id ? null : a.id)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg text-[10px] font-extrabold text-slate-600 transition-colors uppercase tracking-widest"
-                >
+                <button onClick={() => setActiveResolutionId(activeResolutionId === a.id ? null : a.id)} className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg text-[10px] font-extrabold text-slate-600 transition-colors uppercase tracking-widest">
                   <span className="flex items-center gap-2"><Settings2 size={12} /> Classify / Bypass</span>
                   <ChevronDown size={14} className={`transition-transform ${activeResolutionId === a.id ? 'rotate-180' : ''}`} />
                 </button>
-                
                 {activeResolutionId === a.id && (
                   <div className="mt-2 bg-slate-50 p-3 rounded-lg border border-slate-200 animate-in fade-in slide-in-from-top-1 shadow-inner">
-                    <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1.5">Override Status / Action</label>
-                    <select 
-                      className="w-full p-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm"
-                      onChange={(e) => {
-                          if (e.target.value) {
-                             handleResolveAlarm(a.id, e.target.value as HealthStatus);
-                          }
-                      }}
-                      defaultValue=""
-                    >
+                    <select className="w-full p-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" onChange={(e) => e.target.value && handleResolveAlarm(a.id, e.target.value as HealthStatus)} defaultValue="">
                         <option value="" disabled>Select Classification...</option>
-                        <option value="Satisfactory">Satisfactory (Bypass / False Alarm)</option>
-                        <option value="Poor">Poor (Downgrade Critical)</option>
-                        <option value="Correction of Grounding">Maintenance: Grounding Fix</option>
-                        <option value="De-energized">Maintenance: De-energized</option>
+                        <option value="Satisfactory">Satisfactory (Bypass)</option>
+                        <option value="Correction of Grounding">Grounding Fix Required</option>
+                        <option value="De-energized">Unit De-energized</option>
                     </select>
                   </div>
                 )}
@@ -356,51 +296,31 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
             </div>
           )) : (
             <div className="w-full bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-center gap-3 text-emerald-600 font-medium">
-               <ShieldCheck size={20} />
-               <span className="text-xs uppercase tracking-wider">All systems operational</span>
+               <ShieldCheck size={20} /> <span className="text-xs uppercase tracking-wider">All systems operational</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Operational Health Overview Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <h3 className="text-lg font-bold text-slate-800">Operational Health Overview</h3>
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-              <input 
-                type="text" 
-                placeholder="Search asset, substation, district..." 
-                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs w-48 outline-none focus:ring-2 focus:ring-blue-500"
-                value={tableSearch}
-                onChange={e => setTableSearch(e.target.value)}
-              />
+              <input type="text" placeholder="Search..." className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs w-48 outline-none focus:ring-2 focus:ring-blue-500" value={tableSearch} onChange={e => setTableSearch(e.target.value)} />
             </div>
-            <select 
-              className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold outline-none"
-              value={tableRatedKVFilter}
-              onChange={e => setTableRatedKVFilter(e.target.value === 'All' ? 'All' : parseFloat(e.target.value))}
-            >
+            <select className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold outline-none" value={tableRatedKVFilter} onChange={e => setTableRatedKVFilter(e.target.value === 'All' ? 'All' : parseFloat(e.target.value))}>
               <option value="All">All Rated kV</option>
-              {Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: any, b: any) => a - b).map(kv => (
-                <option key={kv} value={kv}>{kv} kV</option>
-              ))}
+              {Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: any, b: any) => a - b).map(kv => <option key={kv} value={kv}>{kv} kV</option>)}
             </select>
-            <select 
-              className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold outline-none"
-              value={tableStatusFilter}
-              onChange={e => setTableStatusFilter(e.target.value as HealthStatus | 'All' | 'At Risk')} // Keep type assertion here as it's for enum-like string values
-            >
+            <select className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold outline-none" value={tableStatusFilter} onChange={e => setTableStatusFilter(e.target.value as any)}>
               <option value="All">All Status</option>
               <option value="Satisfactory">Satisfactory</option>
               <option value="Poor">Poor</option>
               <option value="Critical">Critical</option>
               <option value="At Risk">At Risk</option>
               <option value="Probe Failure">Probe Failure</option>
-              <option value="De-energized">De-energized</option>
-              <option value="Correction of Grounding">Grounding Fix</option>
             </select>
           </div>
         </div>
@@ -408,7 +328,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
           <table className="w-full text-left text-sm border-collapse">
             <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-widest border-b border-slate-100">
               <tr>
-                <th className="px-6 py-4">Current Status</th>
+                <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Equipment Unit</th>
                 <th className="px-6 py-4">Substation</th>
                 <th className="px-6 py-4">Rated kV</th>
@@ -420,88 +340,45 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
               {tableItems.map((item) => (
                 <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
                   <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-bold border ${statusColors[item.status]}`}>
-                      {item.status}
-                    </span>
+                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-bold border ${statusColors[item.status]}`}>{item.status}</span>
                   </td>
                   <td className="px-6 py-4">
-                    <button 
-                      onClick={() => handleTrendLink(item.id)}
-                      className="text-left group focus:outline-none"
-                      title="Click to view trend analysis"
-                    >
-                      <div className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors flex items-center gap-2">
-                        {item.name}
-                        <TrendingUp size={14} className="opacity-0 group-hover:opacity-100 text-blue-500 transition-opacity" />
-                      </div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight group-hover:text-slate-500">{item.brand} • {item.model}</div>
+                    <button onClick={() => handleTrendLink(item.id)} className="text-left group focus:outline-none">
+                      <div className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors flex items-center gap-2">{item.name} <TrendingUp size={14} className="opacity-0 group-hover:opacity-100 text-blue-500" /></div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">{item.brand} • {item.model}</div>
                     </button>
                   </td>
-                  <td className="px-6 py-4">
-                    <div className="text-slate-600 font-medium">{item.substation}</div>
-                    <div className="text-[10px] text-blue-600 font-bold uppercase">{item.district}</div>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <div className="font-bold text-slate-700">{item.ratedVoltage} kV</div>
-                  </td>
-                  <td className="px-4 py-4 text-center font-mono font-bold text-blue-600">
-                    {item.latest?.correctedResistiveCurrent || '--'}
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <button onClick={() => setShowHistoryFor(item.id)} className="p-2 text-slate-400 hover:text-blue-600 bg-slate-100 rounded-lg transition-colors"><History size={16} /></button>
-                  </td>
+                  <td className="px-6 py-4"><div className="text-slate-600 font-medium">{item.substation}</div><div className="text-[10px] text-blue-600 font-bold uppercase">{item.district}</div></td>
+                  <td className="px-6 py-4 text-center"><div className="font-bold text-slate-700">{item.ratedVoltage} kV</div></td>
+                  <td className="px-4 py-4 text-center font-mono font-bold text-blue-600">{item.latest?.correctedResistiveCurrent || '--'}</td>
+                  <td className="px-6 py-4 text-center"><button onClick={() => setShowHistoryFor(item.id)} className="p-2 text-slate-400 hover:text-blue-600 bg-slate-100 rounded-lg transition-colors"><History size={16} /></button></td>
                 </tr>
               ))}
-              {tableItems.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400 italic">No assets match the current filter criteria.</td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
-        <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex justify-between items-center text-[10px] font-bold text-slate-400">
-           <span>Displaying top {tableItems.length} matching assets</span>
-           <button onClick={() => { setTableSearch(''); setTableStatusFilter('All'); setTableRatedKVFilter('All'); }} className="text-blue-600 hover:underline transition-colors font-bold uppercase">Reset Filters</button>
-        </div>
       </div>
 
-      {/* Historical Trend Analysis Card */}
       <div id="trend-analysis-section" className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-4">
           <h3 className="font-bold text-slate-800 flex items-center gap-2"><TrendingUp size={18} className="text-blue-500" /> Trend Analysis</h3>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-            <input 
-              type="text" placeholder="Search asset unit..." 
-              className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
-              value={trendSearch} onChange={e => setTrendSearch(e.target.value)}
-            />
+            <input type="text" placeholder="Search..." className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none" value={trendSearch} onChange={e => setTrendSearch(e.target.value)} />
           </div>
-          <div className="flex-1 max-h-48 overflow-y-auto no-scrollbar border border-slate-100 rounded-xl p-2 space-y-1 bg-slate-50/50">
+          <div className="flex-1 max-h-48 overflow-y-auto no-scrollbar border border-slate-100 rounded-xl p-2 bg-slate-50/50">
             {equipments.filter(e => e.name.toLowerCase().includes(trendSearch.toLowerCase())).map(eq => (
-              <button
-                key={eq.id} onClick={() => toggleTrendSelection(eq.id)}
-                className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex justify-between items-center ${selectedTrendIds.includes(eq.id) ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-white text-slate-600'}`}
-              >
-                <span className="truncate">{eq.name}</span>
-                {selectedTrendIds.includes(eq.id) && <Check size={12} />}
+              <button key={eq.id} onClick={() => toggleTrendSelection(eq.id)} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex justify-between items-center ${selectedTrendIds.includes(eq.id) ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-white text-slate-600'}`}>
+                <span className="truncate">{eq.name}</span> {selectedTrendIds.includes(eq.id) && <Check size={12} />}
               </button>
             ))}
           </div>
           <div className="space-y-2 pt-2 border-t border-slate-50">
-             <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 cursor-pointer hover:text-blue-600 transition-colors">
-              <input type="checkbox" checked={chartOptions.showTotal} onChange={e => setChartOptions({...chartOptions, showTotal: e.target.checked})} className="rounded text-blue-600" /> Total Leakage (uA)
-            </label>
-             <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 cursor-pointer hover:text-blue-600 transition-colors">
-              <input type="checkbox" checked={chartOptions.showResistive} onChange={e => setChartOptions({...chartOptions, showResistive: e.target.checked})} className="rounded text-blue-600" /> Resistive Base (uA)
-            </label>
-            <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 cursor-pointer hover:text-blue-600 transition-colors">
-              <input type="checkbox" checked={chartOptions.showCorrected} onChange={e => setChartOptions({...chartOptions, showCorrected: e.target.checked})} className="rounded text-blue-600" /> Corrected Resistive (uA)
-            </label>
+             <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 cursor-pointer"><input type="checkbox" checked={chartOptions.showTotal} onChange={e => setChartOptions({...chartOptions, showTotal: e.target.checked})} className="rounded text-blue-600" /> Total Leakage (uA)</label>
+             <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 cursor-pointer"><input type="checkbox" checked={chartOptions.showResistive} onChange={e => setChartOptions({...chartOptions, showResistive: e.target.checked})} className="rounded text-blue-600" /> Resistive Base (uA)</label>
+             <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 cursor-pointer"><input type="checkbox" checked={chartOptions.showCorrected} onChange={e => setChartOptions({...chartOptions, showCorrected: e.target.checked})} className="rounded text-blue-600" /> Corrected Resistive (uA)</label>
           </div>
         </div>
-
         <div className="lg:col-span-3 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-h-[400px]">
           {selectedTrendIds.length > 0 ? (
             <div className="h-[380px] w-full">
@@ -515,7 +392,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
                   {selectedTrendIds.map((id, index) => {
                     const eq = equipments.find(e => e.id === id);
                     if (!eq) return null;
-                    const colors = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#f97316'];
+                    const colors = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899'];
                     const color = colors[index % colors.length];
                     return (
                       <React.Fragment key={id}>
@@ -529,53 +406,12 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
               </ResponsiveContainer>
             </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-slate-300 space-y-4 py-24 border-2 border-dashed border-slate-100 rounded-2xl bg-slate-50/30">
-              <TrendingUp size={64} className="opacity-10" />
-              <p className="font-bold text-xs uppercase tracking-widest text-slate-400">Select asset units to visualize historical leakage trends</p>
+            <div className="h-full flex flex-col items-center justify-center text-slate-300 py-24 border-2 border-dashed border-slate-100 rounded-2xl bg-slate-50/30">
+              <TrendingUp size={64} className="opacity-10 mb-4" /><p className="font-bold text-xs uppercase tracking-widest text-slate-400">Select units to visualize trends</p>
             </div>
           )}
         </div>
       </div>
-
-      {/* History Modal */}
-      {showHistoryFor && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <div>
-                <h3 className="text-lg font-bold text-slate-800">History: {dashboardData.find(e => e.id === showHistoryFor)?.name}</h3>
-                <p className="text-xs text-slate-400 font-bold uppercase">{dashboardData.find(e => e.id === showHistoryFor)?.substation}</p>
-              </div>
-              <button onClick={() => setShowHistoryFor(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
-            </div>
-            <div className="p-6 max-h-[60vh] overflow-y-auto no-scrollbar">
-              <table className="w-full text-left text-sm">
-                <thead className="text-slate-400 font-bold uppercase text-[10px] border-b">
-                  <tr>
-                    <th className="py-3">Date</th>
-                    <th className="py-3 text-center">Total (uA)</th>
-                    <th className="py-3 text-center">Resistive (uA)</th>
-                    <th className="py-3 text-center font-bold text-blue-600">Corrected (uA)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {readings
-                    .filter(r => r.equipmentId === showHistoryFor)
-                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                    .map(r => (
-                      <tr key={r.id} className="hover:bg-slate-50">
-                        <td className="py-3 font-medium text-slate-600">{formatDisplayDate(r.date)}</td>
-                        <td className="py-3 text-center font-mono">{r.totalCurrent}</td>
-                        <td className="py-3 text-center font-mono">{r.resistiveCurrent}</td>
-                        <td className="py-3 text-center font-mono font-bold text-blue-600">{r.correctedResistiveCurrent}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

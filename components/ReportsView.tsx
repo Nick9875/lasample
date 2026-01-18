@@ -1,8 +1,9 @@
 
 import React, { useState, useMemo } from 'react';
-import { FileText, FileSpreadsheet, Search, Check, Filter } from 'lucide-react';
+import { FileText, FileSpreadsheet, Check, Filter } from 'lucide-react';
 import { Equipment, Reading, ThresholdSettings } from '../types';
 import { exportToExcel, exportToPDF, formatDisplayDate } from '../utils/reports';
+import { calculateHealthStatus } from '../utils/health';
 
 interface ReportsViewProps {
   equipments: Equipment[];
@@ -57,8 +58,8 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
 
   const selectedData = useMemo(() => {
     return readings.filter(r => selectedReadingIds.has(r.id)).map(r => {
-      const eq = equipments.find(e => e.id === r.equipmentId);
-      const status = r.correctedResistiveCurrent > settings.criticalLimit ? 'Critical' : r.correctedResistiveCurrent > settings.poorLimit ? 'Poor' : 'Satisfactory';
+      const eq = equipments.find(e => e.id === r.equipmentId)!;
+      const status = calculateHealthStatus(eq, r, settings);
       return {
         Date: formatDisplayDate(r.date),
         Equipment: eq?.name,
@@ -89,11 +90,9 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Report Engine</h2>
-          <p className="text-slate-500">Generate formatted official health documentation</p>
-        </div>
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800">Report Engine</h2>
+        <p className="text-slate-500">Generate formatted official health documentation</p>
       </div>
 
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -132,11 +131,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
               </div>
               Select All ({filteredReadings.length})
             </button>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{selectedReadingIds.size} Ready for Export</span>
           </div>
           <div className="flex gap-3">
-            <button onClick={handleExportXLSX} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 transition-all uppercase tracking-wide"><FileSpreadsheet size={16} /> XLSX</button>
-            <button onClick={handleExportPDF} className="bg-blue-900 text-white px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-blue-500/20 hover:bg-black transition-all uppercase tracking-wide"><FileText size={16} /> PDF</button>
+            <button onClick={handleExportXLSX} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg hover:bg-emerald-700 uppercase tracking-wide"><FileSpreadsheet size={16} /> XLSX</button>
+            <button onClick={handleExportPDF} className="bg-blue-900 text-white px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg hover:bg-black uppercase tracking-wide"><FileText size={16} /> PDF</button>
           </div>
         </div>
         <div className="overflow-auto flex-1 no-scrollbar">
@@ -151,7 +149,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredReadings.length > 0 ? filteredReadings.map(r => {
+              {filteredReadings.map(r => {
                 const eq = equipments.find(e => e.id === r.equipmentId);
                 const isSelected = selectedReadingIds.has(r.id);
                 return (
@@ -167,14 +165,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
                     <td className="px-6 py-4 font-mono font-bold text-blue-600">{r.correctedResistiveCurrent} uA</td>
                   </tr>
                 );
-              }) : (
-                <tr>
-                  <td colSpan={5} className="py-24 text-center">
-                    <Filter className="mx-auto text-slate-200 mb-4" size={48} />
-                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No records matching active filters</p>
-                  </td>
-                </tr>
-              )}
+              })}
             </tbody>
           </table>
         </div>
