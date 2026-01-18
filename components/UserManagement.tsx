@@ -2,11 +2,12 @@
 import React, { useState } from 'react';
 import { UserPlus, Trash2, Shield, User, X, Wrench, Hammer, Key } from 'lucide-react';
 import { UserAccount, Role, Equipment, Reading, ThresholdSettings } from '../types';
+import { supabase } from '../services/supabaseClient';
 
 interface UserManagementProps {
   users: UserAccount[];
   setUsers: React.Dispatch<React.SetStateAction<UserAccount[]>>;
-  currentUser: UserAccount; // Required for password verification
+  currentUser: UserAccount; 
   setCurrentUser: React.Dispatch<React.SetStateAction<UserAccount | null>>;
   setEquipments: React.Dispatch<React.SetStateAction<Equipment[]>>;
   setReadings: React.Dispatch<React.SetStateAction<Reading[]>>;
@@ -39,7 +40,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
   const [passwordTarget, setPasswordTarget] = useState<UserAccount | null>(null);
   const [newPasswordData, setNewPasswordData] = useState({ new: '', confirm: '' });
 
-  const handleAddUser = (e: React.FormEvent) => {
+  const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (users.find(u => u.username === formData.username)) {
       alert("Username already exists");
@@ -49,12 +50,20 @@ const UserManagement: React.FC<UserManagementProps> = ({
       id: Date.now().toString(),
       ...formData
     };
+
+    const { error } = await supabase.from('user_accounts').insert(newUser);
+    
+    if (error) {
+        alert("Error creating user: " + error.message);
+        return;
+    }
+
     setUsers([...users, newUser]);
     setIsAdding(false);
     setFormData({ username: '', password: '', role: 'Guest' });
   };
 
-  const handleDeleteUser = (id: string) => {
+  const handleDeleteUser = async (id: string) => {
     if (!currentUser || currentUser.role !== 'Admin') {
       alert("Admin access required to delete users.");
       return;
@@ -64,6 +73,11 @@ const UserManagement: React.FC<UserManagementProps> = ({
         return;
     }
     if (confirm("Are you sure you want to delete this user?")) {
+      const { error } = await supabase.from('user_accounts').delete().eq('id', id);
+      if (error) {
+          alert("Error deleting user: " + error.message);
+          return;
+      }
       setUsers(users.filter(u => u.id !== id));
     }
   };
@@ -74,7 +88,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
     setIsChangingPassword(true);
   };
 
-  const handlePasswordChangeSubmit = (e: React.FormEvent) => {
+  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passwordTarget) return;
 
@@ -86,6 +100,15 @@ const UserManagement: React.FC<UserManagementProps> = ({
     if (newPasswordData.new.length < 4) {
       alert("Password is too short (min 4 characters).");
       return;
+    }
+
+    const { error } = await supabase.from('user_accounts')
+        .update({ password: newPasswordData.new })
+        .eq('id', passwordTarget.id);
+
+    if (error) {
+        alert("Error updating password: " + error.message);
+        return;
     }
 
     const updatedUsers = users.map(u => 
@@ -117,8 +140,26 @@ const UserManagement: React.FC<UserManagementProps> = ({
     }
   };
 
-  const confirmFactoryReset = () => {
+  const confirmFactoryReset = async () => {
     if (resetPasswordInput.trim() === currentUser.password) {
+      
+      // Perform DB Truncation
+      // Note: Supabase JS client doesn't have a simple 'truncate' for all tables. 
+      // We delete all rows.
+      await supabase.from('readings').delete().neq('id', '0');
+      await supabase.from('equipment').delete().neq('id', '0');
+      await supabase.from('user_accounts').delete().neq('id', '0'); // Keep admin
+      
+      // Reset Settings
+      await supabase.from('settings').upsert({ id: 1, poorLimit: 300, criticalLimit: 500 });
+
+      // Re-insert Admin if deleted (safety check, although neq id 0 usually handles it if admin id is 0)
+      const { error } = await supabase.from('user_accounts').upsert(defaultAdmin);
+
+      if (error) {
+          alert("Reset partially failed: " + error.message);
+      }
+
       setEquipments([]);
       setReadings([]);
       setSettings(initialThreshold);

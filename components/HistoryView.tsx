@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { Search, Edit3, Trash2, X, Check, Filter, AlertCircle, History, ChevronDown, ChevronUp, Zap, Activity, CheckCircle2, RotateCcw, ShieldAlert } from 'lucide-react';
 import { Reading, Equipment, HealthStatus } from '../types';
 import { formatDisplayDate } from '../utils/reports';
+import { supabase } from '../services/supabaseClient';
 
 interface HistoryViewProps {
   readings: Reading[];
@@ -18,10 +19,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
   const [ratedKVFilter, setRatedKVFilter] = useState<number | 'All'>('All');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempData, setTempData] = useState<Partial<Reading>>({});
-  const [expandedId, setExpandedId] = useState<string | null>(null); // State to manage expanded equipment
+  const [expandedId, setExpandedId] = useState<string | null>(null); 
 
   const ratedVoltageOptions = useMemo(() => {
-    // Fix: Ensure values are treated as numbers in the sort function
     const uniqueVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a, b) => Number(a) - Number(b));
     return ['All', ...uniqueVoltages.map(String)];
   }, [equipments]);
@@ -35,15 +35,14 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
 
   const getStatusForEquipment = (eq: Equipment, latest?: Reading): HealthStatus => {
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
-    if (!latest) return 'Satisfactory'; // Default for equipment with no readings
+    if (!latest) return 'Satisfactory'; 
     const val = Number(latest.correctedResistiveCurrent);
-    if (val === 0) return 'Probe Failure'; // Assuming 0 implies failure
+    if (val === 0) return 'Probe Failure'; 
     if (val > 500) return 'Critical';
     if (val > 300) return 'Poor';
     return 'Satisfactory';
   };
 
-  // Fix: Added explicit type for statusColors
   const statusColors: Record<HealthStatus | string, string> = {
     Satisfactory: 'text-emerald-600 bg-emerald-50 border-emerald-100',
     Poor: 'text-amber-600 bg-amber-50 border-amber-100',
@@ -61,14 +60,13 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
   const filteredEquipments = useMemo(() => {
     return equipments.filter(eq => {
       const latest = getLatestReading(eq.id);
-      const eqStatus = getStatusForEquipment(eq, latest); // Use consistent getStatus function
+      const eqStatus = getStatusForEquipment(eq, latest); 
 
       const searchString = `${eq.name} ${eq.substation} ${eq.district} ${eq.voltageLevel}`.toLowerCase();
       const matchesSearch = searchString.includes(searchTerm.toLowerCase());
       
       let matchesStatus = true;
       if (statusFilter === 'Overridden') {
-         // Special filter for items with active override
          matchesStatus = (eq.statusOverride !== null && eq.statusOverride !== undefined);
       } else if (statusFilter !== 'All') {
          matchesStatus = eqStatus === statusFilter;
@@ -78,7 +76,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
 
       return matchesSearch && matchesStatus && matchesRatedKV;
     })
-    .map(eq => { // Add status to equipment object for easier rendering
+    .map(eq => { 
       const latest = getLatestReading(eq.id);
       return {
         ...eq,
@@ -86,18 +84,23 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
         latestReading: latest
       };
     })
-    .sort((a, b) => { // Sort by Rated kV, then by name
+    .sort((a, b) => { 
       if (a.ratedVoltage !== b.ratedVoltage) {
-        return b.ratedVoltage - a.ratedVoltage; // Descending for higher kV first
+        return b.ratedVoltage - a.ratedVoltage; 
       }
       return a.name.localeCompare(b.name);
     });
   }, [equipments, readings, searchTerm, statusFilter, ratedKVFilter]);
 
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!isAdmin) return alert("Admin access required.");
     if (confirm("Permanently delete this measurement record from the history log?")) {
+      const { error } = await supabase.from('readings').delete().eq('id', id);
+      if (error) {
+          alert("Error deleting record: " + error.message);
+          return;
+      }
       setReadings(prev => prev.filter(r => r.id !== id));
     }
   };
@@ -108,24 +111,35 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
     setTempData({ ...reading });
   };
 
-  const saveEdit = () => {
-    setReadings(prev => prev.map(r => r.id === editingId ? { ...r, ...tempData } as Reading : r));
+  const saveEdit = async () => {
+    const updatedReading = { ...tempData, id: editingId } as Reading;
+    const { error } = await supabase.from('readings').upsert(updatedReading);
+    
+    if (error) {
+        alert("Error updating record: " + error.message);
+        return;
+    }
+
+    setReadings(prev => prev.map(r => r.id === editingId ? updatedReading : r));
     setEditingId(null);
   };
 
-  const handleResetOverride = (eqId: string) => {
+  const handleResetOverride = async (eqId: string) => {
     if (!isAdmin) return alert("Admin access required.");
     if (confirm("Are you sure you want to reset the classification override to automatic detection?")) {
+        
+        // 1. Reset Equipment Override
+        await supabase.from('equipment').update({ statusOverride: null }).eq('id', eqId);
+        
         setEquipments(prev => prev.map(e => e.id === eqId ? { ...e, statusOverride: null } : e));
         
-        // Optionally add a log for the reset action
+        // 2. Add Log
         const eq = equipments.find(e => e.id === eqId);
         if (eq) {
              const resetLog: Reading = {
                 id: `action-reset-${Date.now()}`,
                 equipmentId: eq.id,
                 date: new Date().toISOString().split('T')[0],
-                // We leave values as 0 or undefined-like since it's a log
                 totalCurrent: 0,
                 resistiveCurrent: 0,
                 correctedResistiveCurrent: 0,
@@ -133,6 +147,8 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
                 ratedVoltage: eq.ratedVoltage,
                 notes: 'Action Taken: Override Reset / Auto-mode restored'
              };
+             
+             await supabase.from('readings').insert(resetLog);
              setReadings(prev => [resetLog, ...prev]);
         }
     }

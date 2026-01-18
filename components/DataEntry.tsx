@@ -1,8 +1,10 @@
+
 import React, { useState, useMemo, useRef } from 'react';
 import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2 } from 'lucide-react';
 import { Equipment, Reading } from '../types';
 import { parseInputDate } from '../utils/reports';
 import * as XLSX from 'xlsx';
+import { supabase } from '../services/supabaseClient';
 
 interface DataEntryProps {
   equipments: Equipment[];
@@ -57,12 +59,12 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     return equipments.find(item => item.id === formData.equipmentId);
   }, [equipments, formData.equipmentId]);
 
-  const handleIndividualSubmit = (e: React.FormEvent) => {
+  const handleIndividualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const eq = equipments.find(item => item.id === formData.equipmentId);
     if (!eq) return alert("Select an equipment unit.");
 
-    addReading({
+    const reading: Reading = {
       id: `rd-${Date.now()}`,
       equipmentId: formData.equipmentId,
       date: formData.date,
@@ -71,8 +73,16 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       correctedResistiveCurrent: parseFloat(formData.correctedResistiveCurrent) || 0,
       mcovRating: eq.mcovRating,
       ratedVoltage: eq.ratedVoltage || 0,
-    });
-    alert("Individual reading recorded.");
+    };
+
+    const { error } = await supabase.from('readings').insert(reading);
+    if (error) {
+        alert("Failed to save reading: " + error.message);
+        return;
+    }
+
+    addReading(reading);
+    alert("Individual reading recorded to database.");
     setFormData({ ...formData, totalCurrent: '', resistiveCurrent: '', correctedResistiveCurrent: '' });
   };
 
@@ -83,12 +93,12 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     }));
   };
 
-  const handleBulkSubmit = () => {
-    const entries = Object.entries(bulkInputs).filter(([_key, vals]) => vals.total || vals.resistive || vals.corrected);
+  const handleBulkSubmit = async () => {
+    const entries = Object.entries(bulkInputs).filter(([_key, vals]: [string, { total: string, resistive: string, corrected: string }]) => vals.total || vals.resistive || vals.corrected);
     if (entries.length === 0) return alert("No measurement data entered.");
 
     const batchReadings: Reading[] = [];
-    entries.forEach(([eqId, vals]) => {
+    entries.forEach(([eqId, vals]: [string, { total: string, resistive: string, corrected: string }]) => {
       const eq = equipments.find(e => e.id === eqId);
       if (eq) {
         batchReadings.push({
@@ -104,9 +114,16 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       }
     });
 
+    const { error } = await supabase.from('readings').insert(batchReadings);
+
+    if (error) {
+        alert("Batch upload failed: " + error.message);
+        return;
+    }
+
     setReadings(prev => [...batchReadings, ...prev]);
 
-    alert(`Batch Complete: Successfully recorded ${batchReadings.length} units.`);
+    alert(`Batch Complete: Successfully recorded ${batchReadings.length} units to database.`);
     setBulkInputs({});
   };
 
@@ -123,7 +140,6 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       if (!name) return;
       const eq = bulkEquipments.find(e => e.name.toLowerCase() === name.toLowerCase());
       if (eq) {
-        // Fix: Ensure newBulkInputs[eq.id] is an object before accessing its properties
         if (!newBulkInputs[eq.id]) {
             newBulkInputs[eq.id] = { total: '', resistive: '', corrected: '' };
         }
@@ -192,7 +208,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const bstr = evt.target?.result;
         const workbook = XLSX.read(bstr, { type: 'binary' });
@@ -205,15 +221,14 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
         let successCount = 0;
         let newAssetsCount = 0;
 
+        // Process data locally first
         data.forEach((row) => {
-          // Columns based on system export format + suggested input headers
           const name = (row['Equipment'] || row['Name'] || row['Asset'] || row['Arrester'])?.toString().trim();
           const substation = (row['Substation'] || row['Station'] || row['Sub'])?.toString().trim();
           const dateStr = (row['Date'])?.toString().trim();
           
           if (!name || !substation || !dateStr) return;
 
-          // Lookup equipment by Name + Substation in the current working list
           let eqIndex = updatedEquipments.findIndex(e => 
             e.name.toLowerCase() === name.toLowerCase() && 
             e.substation.toLowerCase() === substation.toLowerCase()
@@ -222,7 +237,6 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
           let eq: Equipment;
 
           if (eqIndex === -1) {
-            // Create new equipment if missing in inventory
             eq = {
               id: `eq-imp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               name: name,
@@ -238,7 +252,6 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
             updatedEquipments.push(eq);
             newAssetsCount++;
           } else {
-            // Update existing equipment metadata if provided in the row
             eq = { ...updatedEquipments[eqIndex] };
             if (row['District']) eq.district = row['District'].toString().trim();
             if (row['Brand']) eq.brand = row['Brand'].toString().trim();
@@ -266,15 +279,23 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
         });
 
         if (successCount > 0) {
+           // Bulk Upsert Equipment
+           const { error: eqError } = await supabase.from('equipment').upsert(updatedEquipments);
+           if (eqError) throw new Error("Equipment sync failed: " + eqError.message);
+
+           // Bulk Insert Readings
+           const { error: rdError } = await supabase.from('readings').insert(newReadings);
+           if (rdError) throw new Error("Reading sync failed: " + rdError.message);
+
           setEquipments(updatedEquipments);
           setReadings(prev => [...newReadings, ...prev]);
           alert(`Integration Complete:\n- Added ${successCount} measurement records.\n- Synchronized ${updatedEquipments.length} inventory items (${newAssetsCount} new assets).`);
         } else {
-          alert("No valid data found in the spreadsheet. Please verify columns: 'Equipment', 'Substation', 'Date'.");
+          alert("No valid data found in the spreadsheet. Please verify columns.");
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Records Integration Error:", err);
-        alert("Failed to integrate data. Ensure the file follows the system export format or includes required headers (Name, Substation, Date, Total, Resistive, Corrected).");
+        alert("Failed to integrate data: " + err.message);
       }
     };
     reader.readAsBinaryString(file);

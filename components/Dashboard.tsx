@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { 
   LineChart as ReLineChart, 
@@ -29,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Equipment, Reading, ThresholdSettings, HealthStatus } from '../types';
 import { formatDisplayDate } from '../utils/reports';
+import { supabase } from '../services/supabaseClient';
 
 interface DashboardProps {
   equipments: Equipment[];
@@ -38,6 +38,11 @@ interface DashboardProps {
   settings: ThresholdSettings;
   searchTerm: string;
   isAdmin: boolean;
+}
+
+interface DashboardItem extends Equipment {
+  latest?: Reading;
+  status: HealthStatus;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readings, setReadings, settings, searchTerm, isAdmin }) => {
@@ -52,15 +57,15 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
 
   const [chartOptions, setChartOptions] = useState({ 
     showTotal: false, 
-    showResistive: true,
+    showResistive: true, 
     showCorrected: true 
   });
 
   const getStatus = (eq: Equipment, latest?: Reading): HealthStatus => {
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
     if (!latest) return 'Satisfactory';
-    const val = Number(latest.correctedResistiveCurrent); // Ensure val is number for comparison
-    if (val === 0) return 'Probe Failure'; // Assuming 0 implies failure
+    const val = Number(latest.correctedResistiveCurrent); 
+    if (val === 0) return 'Probe Failure'; 
     if (val > settings.criticalLimit) return 'Critical';
     if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';
@@ -70,7 +75,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
     return readings.filter(r => r.equipmentId === eqId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
   };
 
-  const dashboardData = useMemo(() => {
+  const dashboardData: DashboardItem[] = useMemo(() => {
     return equipments.map(eq => {
       const latest = getLatestReading(eq.id);
       const status = getStatus(eq, latest);
@@ -79,7 +84,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
   }, [equipments, readings, settings]);
 
   const statsByRatedKV = useMemo(() => {
-    const uniqueRatings = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a, b) => a - b);
+    const uniqueRatings = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: number, b: number) => a - b);
     
     const displayRatings = uniqueRatings.length > 0 ? uniqueRatings : [13.8, 69, 115, 230, 500];
 
@@ -167,13 +172,14 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
     'At Risk': 'text-orange-600 bg-orange-50 border-orange-100'
   };
 
-  const handleResolveAlarm = (eqId: string, resolution: HealthStatus) => {
+  const handleResolveAlarm = async (eqId: string, resolution: HealthStatus) => {
     if (!isAdmin) return alert("Admin access required to classify alarms.");
     
-    // 1. Update Equipment Status Override
+    // 1. Update Equipment Status Override in Supabase
+    await supabase.from('equipment').update({ statusOverride: resolution }).eq('id', eqId);
     setEquipments(prev => prev.map(e => e.id === eqId ? { ...e, statusOverride: resolution } : e));
     
-    // 2. Add History Record (Action Taken)
+    // 2. Add History Record (Action Taken) to Supabase
     const eq = equipments.find(e => e.id === eqId);
     const latest = getLatestReading(eqId);
     
@@ -190,7 +196,11 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
             ratedVoltage: eq.ratedVoltage,
             notes: `Action Taken: Classified as ${resolution}`
         };
-        setReadings(prev => [newReading, ...prev]);
+
+        const { error } = await supabase.from('readings').insert(newReading);
+        if (!error) {
+            setReadings(prev => [newReading, ...prev]);
+        }
     }
     
     setActiveResolutionId(null);
@@ -201,7 +211,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
     const selectedReadings = readings.filter(r => selectedTrendIds.includes(r.equipmentId));
     const dates = Array.from(new Set(selectedReadings.map(r => r.date))).sort();
     
-    return dates.map(date => {
+    return dates.map((date: string) => {
       const entry: Record<string, any> = { date: formatDisplayDate(date) }; 
       selectedTrendIds.forEach(id => {
         const r = readings.find(read => read.equipmentId === id && read.date === date);
@@ -230,42 +240,45 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
     <div className="space-y-6">
       {/* Rated kV Summary Cards */}
       <div className="flex overflow-x-auto gap-4 pb-2 no-scrollbar">
-        {statsByRatedKV.map(v => (
-          <div key={v.ratedKV} className="flex-none w-56 bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col">
-            <div className="flex justify-between items-center mb-2">
-              <span className="font-extrabold text-slate-800">{v.ratedKV} kV</span>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Units: {v.total}</span>
+        {statsByRatedKV.map((v: { ratedKV: number; Satisfactory: number; Poor: number; Critical: number; AtRisk: number; total: number }) => {
+          const satisfactoryPct = v.total > 0 ? (v.Satisfactory / v.total) * 100 : 0;
+          const atRiskPct = v.total > 0 ? (v.AtRisk / v.total) * 100 : 0;
+          return (
+            <div key={v.ratedKV} className="flex-none w-56 bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col">
+              <div className="flex justify-between items-center mb-2">
+                <span className="font-extrabold text-slate-800">{v.ratedKV} kV</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Units: {v.total}</span>
+              </div>
+              <div className="flex gap-1 h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3">
+                <div style={{width: `${satisfactoryPct}%`}} className="bg-emerald-500 h-full"></div>
+                <div style={{width: `${atRiskPct}%`}} className="bg-orange-500 h-full"></div>
+              </div>
+              <div className="grid grid-cols-3 gap-1 border-t border-slate-50 pt-3 flex-1">
+                <button 
+                  onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('Poor'); }} 
+                  className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1"
+                >
+                  <div className="text-[9px] font-bold text-slate-400 uppercase group-hover:text-amber-500">Poor</div>
+                  <div className="text-xs font-bold text-amber-600">{v.Poor}</div>
+                </button>
+                <button 
+                  onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('Critical'); }} 
+                  className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1"
+                >
+                  <div className="text-[9px] font-bold text-slate-400 uppercase group-hover:text-rose-500">Critical</div>
+                  <div className="text-xs font-bold text-rose-600">{v.Critical}</div>
+                </button>
+                <button 
+                  onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('At Risk'); }} 
+                  className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1"
+                >
+                  <div className="text-[9px] font-bold text-slate-400 uppercase group-hover:text-orange-500">At Risk</div>
+                  <div className="text-xs font-bold text-orange-600">{v.AtRisk}</div>
+                </button>
+              </div>
             </div>
-            <div className="flex gap-1 h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3">
-              {/* Explicitly cast values to Number for arithmetic operations */}
-              <div style={{width: `${Number(v.total) > 0 ? (Number(v.Satisfactory)/Number(v.total))*100 : 0}%`}} className="bg-emerald-500 h-full"></div>
-              <div style={{width: `${Number(v.total) > 0 ? (Number(v.AtRisk)/Number(v.total))*100 : 0}%`}} className="bg-orange-500 h-full"></div>
-            </div>
-            <div className="grid grid-cols-3 gap-1 border-t border-slate-50 pt-3 flex-1">
-              <button 
-                onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('Poor'); }} 
-                className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1"
-              >
-                <div className="text-[9px] font-bold text-slate-400 uppercase group-hover:text-amber-500">Poor</div>
-                <div className="text-xs font-bold text-amber-600">{v.Poor}</div>
-              </button>
-              <button 
-                onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('Critical'); }} 
-                className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1"
-              >
-                <div className="text-[9px] font-bold text-slate-400 uppercase group-hover:text-rose-500">Critical</div>
-                <div className="text-xs font-bold text-rose-600">{v.Critical}</div>
-              </button>
-              <button 
-                onClick={() => { setTableRatedKVFilter(v.ratedKV); setTableStatusFilter('At Risk'); }} 
-                className="text-center group transition-colors hover:bg-slate-50 rounded-lg p-1"
-              >
-                <div className="text-[9px] font-bold text-slate-400 uppercase group-hover:text-orange-500">At Risk</div>
-                <div className="text-xs font-bold text-orange-600">{v.AtRisk}</div>
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Global Status Counters */}
@@ -293,7 +306,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
           </h4>
         </div>
         <div className="flex overflow-x-auto gap-3 pb-2 no-scrollbar">
-          {alarms.length > 0 ? alarms.map(a => (
+          {alarms.length > 0 ? alarms.map((a: DashboardItem) => (
             <div key={a.id} className="flex-none w-80 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm hover:shadow-md transition-shadow relative">
               <div className="flex justify-between items-start mb-2">
                 <div className={`p-2 rounded-xl ${a.status === 'Critical' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
@@ -559,7 +572,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
                 <tbody className="divide-y divide-slate-50">
                   {readings
                     .filter(r => r.equipmentId === showHistoryFor)
-                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .sort((a: Reading, b: Reading) => new Date(b.date).getTime() - new Date(a.date).getTime())
                     .map(r => (
                       <tr key={r.id} className="hover:bg-slate-50">
                         <td className="py-3 font-medium text-slate-600">{formatDisplayDate(r.date)}</td>

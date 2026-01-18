@@ -10,12 +10,13 @@ import {
   Menu, 
   LogOut, 
   Database,
-  User,
   Users,
   CheckCircle2,
   AlertCircle,
-  ShieldOff,
-  Activity
+  Activity,
+  Cloud,
+  CloudOff,
+  Loader2
 } from 'lucide-react';
 import { Equipment, Reading, UserAccount, ThresholdSettings, View, HealthStatus, GlobalHealthStats } from './types';
 import Dashboard from './components/Dashboard';
@@ -26,6 +27,7 @@ import AIDiagnostics from './components/AIDiagnostics';
 import SettingsView from './components/SettingsView';
 import ReportsView from './components/ReportsView';
 import UserManagement from './components/UserManagement';
+import { supabase } from './services/supabaseClient';
 
 const INITIAL_THRESHOLD: ThresholdSettings = {
   poorLimit: 300,
@@ -40,56 +42,128 @@ const DEFAULT_ADMIN: UserAccount = {
 };
 
 const App: React.FC = () => {
-  const [users, setUsers] = useState<UserAccount[]>(() => {
-    const saved = localStorage.getItem('la_users');
-    return saved ? JSON.parse(saved) : [DEFAULT_ADMIN];
-  });
-
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
-    const saved = localStorage.getItem('la_current_user');
-    return saved ? JSON.parse(saved) : null;
-  });
-
-  const [equipments, setEquipments] = useState<Equipment[]>(() => {
-    const saved = localStorage.getItem('la_equipments');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [readings, setReadings] = useState<Reading[]>(() => {
-    const saved = localStorage.getItem('la_readings');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [settings, setSettings] = useState<ThresholdSettings>(() => {
-    const saved = localStorage.getItem('la_settings');
-    return saved ? JSON.parse(saved) : INITIAL_THRESHOLD;
-  });
+  const [users, setUsers] = useState<UserAccount[]>([]);
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
+  const [equipments, setEquipments] = useState<Equipment[]>([]);
+  const [readings, setReadings] = useState<Reading[]>([]);
+  const [settings, setSettings] = useState<ThresholdSettings>(INITIAL_THRESHOLD);
+  const [loading, setLoading] = useState(true);
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [searchTerm] = useState(''); // This searchTerm is not used in App.tsx
+  const [searchTerm] = useState('');
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
 
+  // Load Data from Supabase & Setup Realtime Subscriptions
   useEffect(() => {
-    localStorage.setItem('la_users', JSON.stringify(users));
-  }, [users]);
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        
+        // 1. Fetch Settings
+        const { data: settingsData } = await supabase.from('settings').select('*').single();
+        if (settingsData) {
+          setSettings({
+            poorLimit: Number(settingsData.poorLimit),
+            criticalLimit: Number(settingsData.criticalLimit)
+          });
+        }
 
-  useEffect(() => {
-    localStorage.setItem('la_current_user', JSON.stringify(currentUser));
-  }, [currentUser]);
+        // 2. Fetch Users
+        const { data: userData } = await supabase.from('user_accounts').select('*');
+        if (userData && userData.length > 0) {
+           setUsers(userData);
+        } else {
+           setUsers([DEFAULT_ADMIN]);
+        }
 
-  useEffect(() => {
-    localStorage.setItem('la_equipments', JSON.stringify(equipments));
-  }, [equipments]);
+        // 3. Fetch Equipment
+        const { data: eqData } = await supabase.from('equipment').select('*');
+        if (eqData) setEquipments(eqData);
 
-  useEffect(() => {
-    localStorage.setItem('la_readings', JSON.stringify(readings));
-  }, [readings]);
+        // 4. Fetch Readings
+        const { data: readingData } = await supabase.from('readings').select('*');
+        if (readingData) setReadings(readingData);
 
-  useEffect(() => {
-    localStorage.setItem('la_settings', JSON.stringify(settings));
-  }, [settings]);
+        setIsConnected(true);
+      } catch (error) {
+        console.error("Failed to fetch initial data", error);
+        setIsConnected(false);
+        setUsers([DEFAULT_ADMIN]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+
+    // Realtime Subscriptions
+    const channel = supabase.channel('db_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'equipment' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setEquipments((prev) => {
+              if (prev.some(e => e.id === payload.new.id)) return prev;
+              return [...prev, payload.new as Equipment];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setEquipments((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Equipment : item)));
+          } else if (payload.eventType === 'DELETE') {
+            setEquipments((prev) => prev.filter((item) => item.id !== payload.old.id));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'readings' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setReadings((prev) => {
+              if (prev.some(r => r.id === payload.new.id)) return prev;
+              return [payload.new as Reading, ...prev]; // Add new reading to top
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setReadings((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Reading : item)));
+          } else if (payload.eventType === 'DELETE') {
+            setReadings((prev) => prev.filter((item) => item.id !== payload.old.id));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'settings' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+             setSettings({
+               poorLimit: Number(payload.new.poorLimit),
+               criticalLimit: Number(payload.new.criticalLimit)
+             });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'user_accounts' },
+        (payload) => {
+           if (payload.eventType === 'INSERT') {
+             setUsers(prev => [...prev, payload.new as UserAccount]);
+           } else if (payload.eventType === 'UPDATE') {
+             setUsers(prev => prev.map(u => u.id === payload.new.id ? payload.new as UserAccount : u));
+           } else if (payload.eventType === 'DELETE') {
+             setUsers(prev => prev.filter(u => u.id !== payload.old.id));
+           }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
@@ -110,25 +184,22 @@ const App: React.FC = () => {
     setCurrentView('dashboard');
   };
 
-  // Helper function to get latest reading for a given equipment ID
   const getLatestReadingApp = (eqId: string) => {
     return readings
       .filter(r => r.equipmentId === eqId)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
   };
 
-  // Helper function to get status for equipment
   const getStatusApp = (eq: Equipment, latest?: Reading): HealthStatus => {
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
-    if (!latest) return 'Satisfactory'; // Default for equipment with no readings
-    const val = latest.correctedResistiveCurrent;
-    if (val === 0) return 'Probe Failure'; // Assuming 0 implies failure
+    if (!latest) return 'Satisfactory';
+    const val = Number(latest.correctedResistiveCurrent);
+    if (val === 0) return 'Probe Failure';
     if (val > settings.criticalLimit) return 'Critical';
     if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';
   };
 
-  // Memoized global health statistics for the header
   const globalHealthStats: GlobalHealthStats = useMemo(() => {
     let satisfactory = 0;
     let poor = 0;
@@ -139,20 +210,11 @@ const App: React.FC = () => {
       const latest = getLatestReadingApp(eq.id);
       const status = getStatusApp(eq, latest);
       switch (status) {
-        case 'Satisfactory':
-          satisfactory++;
-          break;
-        case 'Poor':
-          poor++;
-          break;
-        case 'Critical':
-          critical++;
-          break;
-        case 'Probe Failure':
-          probeFailure++;
-          break;
-        default:
-          break;
+        case 'Satisfactory': satisfactory++; break;
+        case 'Poor': poor++; break;
+        case 'Critical': critical++; break;
+        case 'Probe Failure': probeFailure++; break;
+        default: break;
       }
     });
 
@@ -176,6 +238,18 @@ const App: React.FC = () => {
     return (((globalHealthStats.atRisk) / globalHealthStats.totalAssets) * 100).toFixed(1);
   }, [globalHealthStats]);
 
+
+  if (loading) {
+      return (
+          <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+              <div className="text-center text-white">
+                  <Loader2 size={48} className="animate-spin mx-auto mb-4 text-blue-500" />
+                  <h2 className="text-xl font-bold">Initializing ArresterGuard...</h2>
+                  <p className="text-slate-400 text-sm mt-2">Connecting to Secure Database</p>
+              </div>
+          </div>
+      );
+  }
 
   if (!currentUser) {
     return (
@@ -223,6 +297,12 @@ const App: React.FC = () => {
                 Sign In
               </button>
             </div>
+            <div className="mt-4 flex justify-center">
+                 {isConnected ? 
+                    <span className="text-[10px] text-emerald-500 flex items-center gap-1"><Cloud size={12}/> Cloud Database Connected</span> : 
+                    <span className="text-[10px] text-amber-500 flex items-center gap-1"><CloudOff size={12}/> Offline Mode / Connection Failed</span>
+                 }
+            </div>
           </form>
         </div>
       </div>
@@ -231,10 +311,8 @@ const App: React.FC = () => {
 
   const isAdmin = currentUser.role === 'Admin';
   const isTechnician = currentUser.role === 'Technician';
-  // Technicians have write access to Equipment, Data Entry, and Dashboard actions
   const hasWriteAccess = isAdmin || isTechnician;
 
-  // Role 'Write' implies Admin OR Technician
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, role: 'All' },
     { id: 'equipment', label: 'Equipment Detail', icon: Database, role: 'All' },
@@ -324,7 +402,6 @@ const App: React.FC = () => {
               <Menu size={24} />
             </button>
             
-            {/* Health Monitoring Percentages */}
             <div className="flex flex-col">
               <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-400 mb-1">
                  <Activity size={12} /> System Health Monitor
@@ -347,7 +424,6 @@ const App: React.FC = () => {
             </div>
           </div>
           
-          {/* Global Health Status in Header */}
           <div className="flex items-center gap-4 ml-auto">
             <div className="hidden sm:flex bg-slate-100 p-2 rounded-xl items-center gap-2 text-xs font-medium text-slate-700">
               <span className="text-[10px] font-bold uppercase tracking-wide">Total Assets:</span>
@@ -423,6 +499,12 @@ const App: React.FC = () => {
                 settings={settings} 
                 setSettings={setSettings} 
                 isAdmin={isAdmin}
+                equipments={equipments}
+                setEquipments={setEquipments}
+                readings={readings}
+                setReadings={setReadings}
+                users={users}
+                setUsers={setUsers}
               />
             )}
             {currentView === 'reports' && (

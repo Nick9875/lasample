@@ -92,7 +92,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
   }, [equipmentsWithStatus, compareSearch, compareIds, filterVoltage, filterStatus]);
 
   const voltageStats = useMemo(() => {
-    const uniqueRatedVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a,b) => a-b);
+    const uniqueRatedVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: number, b: number) => a - b);
     
     return uniqueRatedVoltages.map(ratedKV => {
       const eqAtRatedKV = equipmentsWithStatus.filter(e => e.ratedVoltage === ratedKV);
@@ -108,7 +108,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
   }, [equipments, equipmentsWithStatus]);
 
   const uniqueVoltages = useMemo(() => {
-    return Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a, b) => a - b);
+    return Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: number, b: number) => a - b);
   }, [equipments]);
 
   const handleRunDiagnostic = async () => {

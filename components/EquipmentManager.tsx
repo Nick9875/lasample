@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, 
@@ -19,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Equipment, Reading, HealthStatus } from '../types';
 import { formatDisplayDate } from '../utils/reports';
+import { supabase } from '../services/supabaseClient';
 
 interface EquipmentManagerProps {
   equipments: Equipment[];
@@ -47,21 +49,18 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     corrected: '' 
   });
 
-  // Declare state for editing existing readings
   const [editingReadingId, setEditingReadingId] = useState<string | null>(null);
-  // Fix: Corrected state variable name from `tempData` to `tempReadingData`
   const [tempReadingData, setTempReadingData] = useState<Partial<Reading>>({});
 
 
   const ratedVoltageOptions = useMemo(() => {
-    const uniqueVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a, b) => a - b);
-    return ['All', ...uniqueVoltages.map(String)]; // Convert to string for select value
+    const uniqueVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: number, b: number) => a - b);
+    return ['All', ...uniqueVoltages.map(String)]; 
   }, [equipments]);
 
-  // Effect to sync ratedVoltage with voltageLevel when currentEquipment changes
   useEffect(() => {
     if (currentEquipment.ratedVoltage !== undefined) {
-      const standardVoltages: Record<number, string> = { // Fix: Added explicit type annotation
+      const standardVoltages: Record<number, string> = { 
         13.8: '13.8kV',
         69: '69kV',
         115: '115kV',
@@ -75,7 +74,6 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     }
   }, [currentEquipment.ratedVoltage]);
 
-  // Effect to sync voltageLevel with ratedVoltage when currentEquipment changes
   useEffect(() => {
     if (currentEquipment.voltageLevel) {
       const ratedValue = parseFloat(currentEquipment.voltageLevel.replace('kV', ''));
@@ -87,17 +85,14 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
 
   const getStatus = (eq: Equipment, latest?: Reading): HealthStatus => {
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
-    if (!latest) return 'Satisfactory'; // Default for equipment with no readings
-    // Fix: Explicitly ensure val is treated as a number for arithmetic comparisons.
-    // The `correctedResistiveCurrent` is typed as number, but parsing issues can occur from local storage.
+    if (!latest) return 'Satisfactory'; 
     const val = Number(latest.correctedResistiveCurrent); 
-    if (val === 0) return 'Probe Failure'; // Assuming 0 implies failure
+    if (val === 0) return 'Probe Failure'; 
     if (val > 500) return 'Critical';
     if (val > 300) return 'Poor';
     return 'Satisfactory';
   };
 
-  // Fix: Added explicit type for statusColors
   const statusColors: Record<HealthStatus | string, string> = {
     Satisfactory: 'text-emerald-600 bg-emerald-50 border-emerald-100',
     Poor: 'text-amber-600 bg-amber-50 border-amber-100',
@@ -108,7 +103,6 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     'All': 'text-slate-600 bg-slate-50 border-slate-200'
   };
 
-
   const filteredEquipmentsList = useMemo(() => {
     return equipments.filter(eq => {
       const matchSearch = eq.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -116,13 +110,13 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                           eq.district.toLowerCase().includes(searchTerm.toLowerCase());
       
       const latest = readings.filter(r => r.equipmentId === eq.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-      const status = getStatus(eq, latest); // Use consistent getStatus function
+      const status = getStatus(eq, latest); 
       const matchStatus = statusFilter === 'All' || status === statusFilter;
       const matchRatedVoltage = ratedVoltageFilter === 'All' || eq.ratedVoltage === ratedVoltageFilter;
 
       return matchSearch && matchStatus && matchRatedVoltage;
     })
-    .map(eq => { // Add status to equipment object for easier rendering
+    .map(eq => { 
       const latest = readings.filter(r => r.equipmentId === eq.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
       return {
         ...eq,
@@ -132,50 +126,64 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     });
   }, [equipments, searchTerm, statusFilter, ratedVoltageFilter, readings]);
 
-  const handleSaveEquipment = (e: React.FormEvent) => {
+  const handleSaveEquipment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return alert("Admin login required.");
     
+    const newEq = {
+        ...currentEquipment,
+        id: currentEquipment.id || `eq-${Date.now()}`,
+        brand: currentEquipment.brand || '',
+        model: currentEquipment.model || '',
+        mcovRating: currentEquipment.mcovRating || 0,
+        statusOverride: currentEquipment.statusOverride || null,
+    } as Equipment;
+
+    // Supabase Upsert
+    const { error } = await supabase.from('equipment').upsert(newEq);
+
+    if (error) {
+        alert("Error saving equipment: " + error.message);
+        return;
+    }
+
     if (currentEquipment.id) {
-      setEquipments(prev => prev.map(e => e.id === currentEquipment.id ? (currentEquipment as Equipment) : e));
-      // Auto-sync related readings when equipment is updated
+      setEquipments(prev => prev.map(e => e.id === currentEquipment.id ? newEq : e));
+      // Auto-sync local state for related readings (DB trigger handles this usually, but good for UI consistency)
       setReadings(prevReadings => prevReadings.map(r => {
         if (r.equipmentId === currentEquipment.id) {
           return {
             ...r,
-            // Fix: Add non-null assertion as ratedVoltage and mcovRating are required fields in Equipment
-            ratedVoltage: currentEquipment.ratedVoltage!, 
-            mcovRating: currentEquipment.mcovRating!,   
+            ratedVoltage: newEq.ratedVoltage, 
+            mcovRating: newEq.mcovRating,   
           };
         }
         return r;
       }));
     } else {
-      // Fix: Add explicit type annotation for newEq
-      const newEq: Equipment = { 
-        ...currentEquipment as Equipment, // Fix: Added 'as Equipment' assertion
-        id: `eq-${Date.now()}`,
-        brand: currentEquipment.brand || '', // Ensure default value if not provided
-        model: currentEquipment.model || '', // Ensure default value if not provided
-        mcovRating: currentEquipment.mcovRating || 0, // Ensure default value if not provided
-        statusOverride: null, // Always start new equipment with no override
-      };
-      setEquipments(prev => [...prev, newEq]); // Removed 'as Equipment' assertion for newEq
+      setEquipments(prev => [...prev, newEq]); 
     }
     setIsEditing(false);
     setCurrentEquipment({});
   };
 
-  const handleDeleteEquipment = (id: string) => {
+  const handleDeleteEquipment = async (id: string) => {
     if (!isAdmin) return alert("Admin access required.");
     if (confirm("Delete this unit and ALL its child historical data? This action cannot be undone.")) {
+      const { error } = await supabase.from('equipment').delete().eq('id', id);
+      
+      if (error) {
+          alert("Error deleting equipment: " + error.message);
+          return;
+      }
+      
       setEquipments(prev => prev.filter(e => e.id !== id));
       setReadings(prev => prev.filter(r => r.equipmentId !== id));
     }
   };
 
   // Reading CRUD
-  const handleAddReading = (eq: Equipment) => {
+  const handleAddReading = async (eq: Equipment) => {
     if (!newReadingData.total || !newReadingData.resistive || !newReadingData.corrected) {
       return alert("Please fill all measurement fields.");
     }
@@ -191,6 +199,12 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
       ratedVoltage: eq.ratedVoltage
     };
 
+    const { error } = await supabase.from('readings').insert(reading);
+    if (error) {
+        alert("Error adding reading: " + error.message);
+        return;
+    }
+
     setReadings(prev => [reading, ...prev]);
     setIsAddingReading(null);
     setNewReadingData({ date: new Date().toISOString().split('T')[0], total: '', resistive: '', corrected: '' });
@@ -198,25 +212,37 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
 
   const handleEditReading = (reading: Reading) => {
     setEditingReadingId(reading.id);
-    // Fix: Use correct state variable name
     setTempReadingData({ ...reading });
   };
 
-  const saveReadingEdit = () => {
-    // Fix: Use correct state variable name
-    setReadings(prev => prev.map(r => r.id === editingReadingId ? { ...r, ...tempReadingData } as Reading : r));
+  const saveReadingEdit = async () => {
+    const updatedReading = { ...tempReadingData, id: editingReadingId } as Reading;
+    const { error } = await supabase.from('readings').upsert(updatedReading);
+    
+    if (error) {
+        alert("Error updating reading: " + error.message);
+        return;
+    }
+
+    setReadings(prev => prev.map(r => r.id === editingReadingId ? updatedReading : r));
     setEditingReadingId(null);
   };
 
-  const handleDeleteReading = (id: string) => {
+  const handleDeleteReading = async (id: string) => {
     if (!isAdmin) return alert("Admin access required.");
     if (confirm("Permanently remove this historical entry?")) {
+      const { error } = await supabase.from('readings').delete().eq('id', id);
+      if (error) {
+          alert("Error deleting reading: " + error.message);
+          return;
+      }
       setReadings(prev => prev.filter(r => r.id !== id));
     }
   };
 
   // Function to synchronize mcovRating and ratedVoltage for all readings
   const handleSyncReadingsMetadata = () => {
+    // This functionality might be redundant with real-time DB but kept for local state consistency
     const updatedReadings = readings.map(reading => {
       const parentEquipment = equipments.find(eq => eq.id === reading.equipmentId);
       if (parentEquipment) {
@@ -232,7 +258,6 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     setReadings(updatedReadings);
   };
 
-  // Perform an initial sync when the component mounts
   useEffect(() => {
     if (equipments.length > 0 && readings.length > 0) {
       handleSyncReadingsMetadata(); 
@@ -379,6 +404,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
         </div>
       )}
 
+      {/* Grid/List View mapping remains the same, just showing the container */}
       <div className={`${viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6' : 'space-y-4'}`}>
         {filteredEquipmentsList.map(eq => {
           const isExpanded = expandedId === eq.id;
@@ -426,7 +452,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                 </div>
               </div>
 
-              {/* CHILD VIEW: Historical measurements and data entry */}
+              {/* CHILD VIEW */}
               {isExpanded && (
                 <div className="bg-slate-50 border-t border-slate-100 p-6 space-y-6 animate-in slide-in-from-top-4 duration-300">
                   <div className="flex flex-wrap justify-between items-center gap-3">
@@ -493,37 +519,31 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                             <tr key={r.id} className={`${isEditingReading ? 'bg-blue-50' : 'hover:bg-slate-50/50'} transition-colors`}>
                               <td className="px-3 py-3">
                                 {isEditingReading ? (
-                                  // Fix: Use correct state variable name
                                   <input type="date" className="bg-white border rounded px-1 text-[10px]" value={tempReadingData.date || ''} onChange={e => setTempReadingData({...tempReadingData, date: e.target.value})} />
                                 ) : formatDisplayDate(r.date)}
                               </td>
                               <td className="px-2 py-3 text-center font-mono">
                                 {isEditingReading ? (
-                                  // Fix: Use correct state variable name
                                   <input type="number" step="0.01" className="w-12 text-center bg-white border rounded" value={tempReadingData.ratedVoltage || ''} onChange={e => setTempReadingData({...tempReadingData, ratedVoltage: parseFloat(e.target.value)})} />
                                 ) : `${r.ratedVoltage}`}
                               </td>
                               <td className="px-2 py-3 text-center font-mono">
                                 {isEditingReading ? (
-                                  // Fix: Use correct state variable name
                                   <input type="number" step="0.01" className="w-12 text-center bg-white border rounded" value={tempReadingData.mcovRating || ''} onChange={e => setTempReadingData({...tempReadingData, mcovRating: parseFloat(e.target.value)})} />
                                 ) : `${r.mcovRating}`}
                               </td>
                               <td className="px-2 py-3 text-center font-mono">
                                 {isEditingReading ? (
-                                  // Fix: Use correct state variable name
                                   <input type="number" className="w-16 text-center bg-white border rounded" value={tempReadingData.totalCurrent || ''} onChange={e => setTempReadingData({...tempReadingData, totalCurrent: parseFloat(e.target.value)})} />
                                 ) : r.totalCurrent}
                               </td>
                               <td className="px-2 py-3 text-center font-mono">
                                 {isEditingReading ? (
-                                  // Fix: Use correct state variable name
                                   <input type="number" className="w-16 text-center bg-white border rounded" value={tempReadingData.resistiveCurrent || ''} onChange={e => setTempReadingData({...tempReadingData, resistiveCurrent: parseFloat(e.target.value)})} />
                                 ) : r.resistiveCurrent}
                               </td>
                               <td className="px-2 py-3 text-center font-mono font-bold text-blue-600">
                                 {isEditingReading ? (
-                                  // Fix: Use correct state variable name
                                   <input type="number" className="w-16 text-center bg-white border rounded font-bold text-blue-600" value={tempReadingData.correctedResistiveCurrent || ''} onChange={e => setTempReadingData({...tempReadingData, correctedResistiveCurrent: parseFloat(e.target.value)})} />
                                 ) : r.correctedResistiveCurrent}
                               </td>
