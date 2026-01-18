@@ -400,11 +400,9 @@ const App: React.FC = () => {
               <LogOut size={16} />
             </button>
           </div>
-          {isAdmin && (
-            <div className="mt-2 text-[10px] text-slate-600 text-center">
-              Copyright 2026 by N.V Allonar
-            </div>
-          )}
+          <div className="mt-2 text-sm text-slate-500 text-center font-semibold">
+            © 2026 N.V Allonar™
+          </div>
         </div>
       </aside>
 
