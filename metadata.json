@@ -1,5 +1,5 @@
 {
-  "name": "NVA ArresterGuard with AI",
+  "name": "copy NVA ArresterGuard with AI",
   "description": "An advanced Lightning Arrester leakage current monitoring and diagnostic tool with AI-powered trend analysis and health reporting.",
   "requestFramePermissions": [
     "camera"
