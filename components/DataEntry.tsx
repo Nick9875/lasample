@@ -1,0 +1,560 @@
+
+import React, { useState, useMemo, useRef } from 'react';
+import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2 } from 'lucide-react';
+import { Equipment, Reading } from '../types';
+import { parseInputDate } from '../utils/reports';
+import * as XLSX from 'xlsx';
+
+interface DataEntryProps {
+  equipments: Equipment[];
+  setEquipments: React.Dispatch<React.SetStateAction<Equipment[]>>;
+  addReading: (r: Reading) => void;
+  setReadings: React.Dispatch<React.SetStateAction<Reading[]>>;
+  isAdmin: boolean;
+}
+
+const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addReading, setReadings, isAdmin }) => {
+  const [activeTab, setActiveTab] = useState<'individual' | 'bulk'>('individual');
+  const [filterDistrict, setFilterDistrict] = useState('');
+  const [filterSubstation, setFilterSubstation] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recordsImportInputRef = useRef<HTMLInputElement>(null);
+
+  const [formData, setFormData] = useState({
+    equipmentId: '',
+    date: new Date().toISOString().split('T')[0],
+    totalCurrent: '',
+    resistiveCurrent: '',
+    correctedResistiveCurrent: '',
+  });
+
+  const [bulkDate, setBulkDate] = useState(new Date().toISOString().split('T')[0]);
+  const [bulkSubstation, setBulkSubstation] = useState('');
+  const [bulkInputs, setBulkInputs] = useState<Record<string, { total: string, resistive: string, corrected: string }>>({});
+  
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pastedColumns, setPastedColumns] = useState({
+    names: '',
+    totals: '',
+    resistive: '',
+    corrected: ''
+  });
+
+  const districts = useMemo(() => Array.from(new Set(equipments.map(e => e.district))).sort(), [equipments]);
+  const substationsForFilter = useMemo(() => {
+    const filtered = filterDistrict ? equipments.filter(e => e.district === filterDistrict) : equipments;
+    return Array.from(new Set(filtered.map(e => e.substation))).sort();
+  }, [equipments, filterDistrict]);
+
+  const substations = useMemo(() => {
+    return Array.from(new Set(equipments.map(e => e.substation))).sort();
+  }, [equipments]);
+
+  const bulkEquipments = useMemo(() => {
+    return equipments.filter(e => e.substation === bulkSubstation);
+  }, [equipments, bulkSubstation]);
+
+  const selectedEquipmentForIndividualEntry = useMemo(() => {
+    return equipments.find(item => item.id === formData.equipmentId);
+  }, [equipments, formData.equipmentId]);
+
+  const handleIndividualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const eq = equipments.find(item => item.id === formData.equipmentId);
+    if (!eq) return alert("Select an equipment unit.");
+
+    addReading({
+      id: `rd-${Date.now()}`,
+      equipmentId: formData.equipmentId,
+      date: formData.date,
+      totalCurrent: parseFloat(formData.totalCurrent) || 0,
+      resistiveCurrent: parseFloat(formData.resistiveCurrent) || 0,
+      correctedResistiveCurrent: parseFloat(formData.correctedResistiveCurrent) || 0,
+      mcovRating: eq.mcovRating,
+      ratedVoltage: eq.ratedVoltage || 0,
+    });
+    alert("Individual reading recorded.");
+    setFormData({ ...formData, totalCurrent: '', resistiveCurrent: '', correctedResistiveCurrent: '' });
+  };
+
+  const handleBulkInputChange = (eqId: string, field: 'total' | 'resistive' | 'corrected', value: string) => {
+    setBulkInputs(prev => ({
+      ...prev,
+      [eqId]: { ...(prev[eqId] || { total: '', resistive: '', corrected: '' }), [field]: value }
+    }));
+  };
+
+  const handleBulkSubmit = () => {
+    // Fix: Explicitly type entries to allow property access on 'vals'
+    const entries = Object.entries(bulkInputs).filter(([_key, vals]: [string, any]) => vals.total || vals.resistive || vals.corrected);
+    if (entries.length === 0) return alert("No measurement data entered.");
+
+    const batchReadings: Reading[] = [];
+    // Fix: Explicitly type forEach parameters
+    entries.forEach(([eqId, vals]: [string, any]) => {
+      const eq = equipments.find(e => e.id === eqId);
+      if (eq) {
+        batchReadings.push({
+          id: `rd-${Date.now()}-${eqId}-${Math.random().toString(36).substr(2, 4)}`,
+          equipmentId: eqId,
+          date: bulkDate,
+          totalCurrent: parseFloat(vals.total) || 0,
+          resistiveCurrent: parseFloat(vals.resistive) || 0,
+          correctedResistiveCurrent: parseFloat(vals.corrected) || 0,
+          mcovRating: eq.mcovRating,
+          ratedVoltage: eq.ratedVoltage || 0,
+        });
+      }
+    });
+
+    setReadings(prev => [...batchReadings, ...prev]);
+
+    alert(`Batch Complete: Successfully recorded ${batchReadings.length} units.`);
+    setBulkInputs({});
+  };
+
+  const applyColumnPaste = () => {
+    const namesArr = pastedColumns.names.split(/\r?\n/).map(s => s.trim());
+    const totalsArr = pastedColumns.totals.split(/\r?\n/).map(s => s.trim());
+    const resArr = pastedColumns.resistive.split(/\r?\n/).map(s => s.trim());
+    const corrArr = pastedColumns.corrected.split(/\r?\n/).map(s => s.trim());
+
+    const newBulkInputs = { ...bulkInputs };
+    let matchCount = 0;
+
+    namesArr.forEach((name, i) => {
+      if (!name) return;
+      const eq = bulkEquipments.find(e => e.name.toLowerCase() === name.toLowerCase());
+      if (eq) {
+        // Fix: Ensure newBulkInputs[eq.id] is an object before accessing its properties
+        if (!newBulkInputs[eq.id]) {
+            newBulkInputs[eq.id] = { total: '', resistive: '', corrected: '' };
+        }
+        newBulkInputs[eq.id].total = totalsArr[i] || newBulkInputs[eq.id].total;
+        newBulkInputs[eq.id].resistive = resArr[i] || newBulkInputs[eq.id].resistive;
+        newBulkInputs[eq.id].corrected = corrArr[i] || newBulkInputs[eq.id].corrected;
+        matchCount++;
+      }
+    });
+
+    setBulkInputs(newBulkInputs);
+    setShowPasteModal(false);
+    setPastedColumns({ names: '', totals: '', resistive: '', corrected: '' });
+    alert(`Successfully mapped ${matchCount} records from pasted data.`);
+  };
+
+  const handleXlsxImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const wsname = workbook.SheetNames[0];
+        const ws = workbook.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+        const localBulkInputs = { ...bulkInputs };
+        let importCount = 0;
+
+        data.forEach((row) => {
+          const name = (row['Equipment Name'] || row['Name'] || row['Arrester'] || row['unit'])?.toString().trim();
+          if (!name) return;
+
+          const eq = bulkEquipments.find(e => e.name.toLowerCase() === name.toLowerCase());
+
+          if (eq) {
+            const total = row['Total Current (uA)'] || row['Total (uA)'] || row['Total'] || 0;
+            const res = row['Resistive Current (uA)'] || row['Resistive (uA)'] || row['Resistive'] || 0;
+            const corr = row['Corrected Resistive (uA)'] || row['Corrected (uA)'] || row['Corrected'] || 0;
+
+            localBulkInputs[eq.id] = {
+              total: total.toString(),
+              resistive: res.toString(),
+              corrected: corr.toString()
+            };
+            importCount++;
+          }
+        });
+
+        setBulkInputs(localBulkInputs);
+        alert(`Batch Load: Successfully populated measurement fields for ${importCount} assets.`);
+      } catch (err) {
+        console.error("XLSX Import Error:", err);
+        alert("Failed to parse spreadsheet. Check file compatibility.");
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const handleXlsxRecordsImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const wsname = workbook.SheetNames[0];
+        const ws = workbook.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+        const newReadings: Reading[] = [];
+        let updatedEquipments = [...equipments];
+        let successCount = 0;
+        let newAssetsCount = 0;
+
+        data.forEach((row) => {
+          // Columns based on system export format + suggested input headers
+          const name = (row['Equipment'] || row['Name'] || row['Asset'] || row['Arrester'])?.toString().trim();
+          const substation = (row['Substation'] || row['Station'] || row['Sub'])?.toString().trim();
+          const dateStr = (row['Date'])?.toString().trim();
+          
+          if (!name || !substation || !dateStr) return;
+
+          // Lookup equipment by Name + Substation in the current working list
+          let eqIndex = updatedEquipments.findIndex(e => 
+            e.name.toLowerCase() === name.toLowerCase() && 
+            e.substation.toLowerCase() === substation.toLowerCase()
+          );
+
+          let eq: Equipment;
+
+          if (eqIndex === -1) {
+            // Create new equipment if missing in inventory
+            eq = {
+              id: `eq-imp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              name: name,
+              substation: substation,
+              district: (row['District'] || 'General')?.toString().trim(),
+              voltageLevel: (row['Voltage Level'] || row['Voltage'] || '230kV')?.toString().trim(),
+              ratedVoltage: parseFloat(row['Rated kV'] || row['Rated (kV)'] || row['Rated'] || 0),
+              brand: (row['Brand'] || 'N/A')?.toString().trim(),
+              model: (row['Model'] || 'N/A')?.toString().trim(),
+              mcovRating: parseFloat(row['MCOV Rating'] || row['MCOV'] || row['MCOV (kV)'] || 0),
+              statusOverride: null
+            };
+            updatedEquipments.push(eq);
+            newAssetsCount++;
+          } else {
+            // Update existing equipment metadata if provided in the row
+            eq = { ...updatedEquipments[eqIndex] };
+            if (row['District']) eq.district = row['District'].toString().trim();
+            if (row['Brand']) eq.brand = row['Brand'].toString().trim();
+            if (row['Model']) eq.model = row['Model'].toString().trim();
+            if (row['Rated kV'] || row['Rated (kV)'] || row['Rated']) {
+                eq.ratedVoltage = parseFloat(row['Rated kV'] || row['Rated (kV)'] || row['Rated']);
+            }
+            if (row['MCOV Rating'] || row['MCOV'] || row['MCOV (kV)']) {
+                eq.mcovRating = parseFloat(row['MCOV Rating'] || row['MCOV'] || row['MCOV (kV)']);
+            }
+            updatedEquipments[eqIndex] = eq;
+          }
+
+          newReadings.push({
+            id: `rd-imp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            equipmentId: eq.id,
+            date: parseInputDate(row['Date']),
+            totalCurrent: parseFloat(row['Total (uA)'] || row['Total'] || 0),
+            resistiveCurrent: parseFloat(row['Resistive (uA)'] || row['Resistive'] || 0),
+            correctedResistiveCurrent: parseFloat(row['Corrected (uA)'] || row['Corrected'] || 0),
+            mcovRating: eq.mcovRating,
+            ratedVoltage: eq.ratedVoltage,
+          });
+          successCount++;
+        });
+
+        if (successCount > 0) {
+          setEquipments(updatedEquipments);
+          setReadings(prev => [...newReadings, ...prev]);
+          alert(`Integration Complete:\n- Added ${successCount} measurement records.\n- Synchronized ${updatedEquipments.length} inventory items (${newAssetsCount} new assets).`);
+        } else {
+          alert("No valid data found in the spreadsheet. Please verify columns: 'Equipment', 'Substation', 'Date'.");
+        }
+      } catch (err) {
+        console.error("Records Integration Error:", err);
+        alert("Failed to integrate data. Ensure the file follows the system export format or includes required headers (Name, Substation, Date, Total, Resistive, Corrected).");
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      <div className="bg-blue-600 rounded-2xl p-8 text-white shadow-xl flex flex-col md:flex-row justify-between items-center overflow-hidden gap-6">
+        <div>
+          <h2 className="text-3xl font-extrabold tracking-tight">Data Integration Center</h2>
+          <p className="text-blue-100 mt-2 opacity-80 font-medium">Record measurements and synchronize equipment inventory</p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <input type="file" ref={recordsImportInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleXlsxRecordsImport} />
+          <button 
+            onClick={() => recordsImportInputRef.current?.click()}
+            className="px-5 py-2.5 bg-blue-500/40 text-white border border-blue-400/30 rounded-xl text-xs font-bold hover:bg-blue-500/60 transition-all flex items-center gap-2"
+          >
+            <FileSpreadsheet size={14} /> Import & Sync Records
+          </button>
+
+          <div className="flex bg-blue-500/30 p-1.5 rounded-2xl gap-1">
+            <button 
+              onClick={() => setActiveTab('individual')} 
+              className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'individual' ? 'bg-white text-blue-600 shadow-sm' : 'text-blue-50 hover:bg-blue-400/20'}`}
+            >
+              Manual
+            </button>
+            <button 
+              onClick={() => setActiveTab('bulk')} 
+              className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'bulk' ? 'bg-white text-blue-600 shadow-sm' : 'text-blue-600 shadow-sm' && activeTab === 'bulk' ? 'bg-white text-blue-600' : 'text-blue-50 hover:bg-blue-400/20'}`}
+            >
+              Batch
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-4 items-end">
+        <div className="flex-1 w-full">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">District Filter</label>
+          <select className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none" value={filterDistrict} onChange={e => { setFilterDistrict(e.target.value); setFilterSubstation(''); }}>
+            <option value="">All Operational Districts</option>
+            {districts.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+        <div className="flex-1 w-full">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Substation Selection</label>
+          <select className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none" value={filterSubstation} onChange={e => setFilterSubstation(e.target.value)}>
+            <option value="">All Substations</option>
+            {substations.filter(s => s !== 'All').map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <button 
+          onClick={() => { setFilterDistrict(''); setFilterSubstation(''); }}
+          className="px-5 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-blue-600 font-bold text-xs uppercase tracking-widest transition-colors outline-none"
+        >
+          Reset
+        </button>
+      </div>
+
+      {activeTab === 'individual' ? (
+        <form onSubmit={handleIndividualSubmit} className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm space-y-8 animate-in fade-in slide-in-from-bottom-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Selected Arrester Unit</label>
+              <select required className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={formData.equipmentId} onChange={e => setFormData({...formData, equipmentId: e.target.value})}>
+                <option value="">-- Select Asset --</option>
+                {equipments.filter(e => !filterSubstation || e.substation === filterSubstation).map(e => <option key={e.id} value={e.id}>{e.name} • {e.substation}</option>)}
+              </select>
+              {selectedEquipmentForIndividualEntry && (
+                <div className="mt-4 p-3 bg-slate-50 rounded-lg flex items-center justify-between text-xs text-slate-600 font-bold animate-in fade-in slide-in-from-bottom-1">
+                  <div className="flex items-center gap-2">
+                    <Activity size={14} className="text-blue-500" />
+                    <span className="uppercase tracking-wide">Parent Details:</span>
+                  </div>
+                  <span>Rated: {selectedEquipmentForIndividualEntry.ratedVoltage} kV</span>
+                  <span>MCOV: {selectedEquipmentForIndividualEntry.mcovRating} kV</span>
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Measurement Date</label>
+              <input type="date" required className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-blue-500 outline-none" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+            </div>
+            <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6 border-t border-slate-100 pt-8">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Total Current (uA)</label>
+                <input type="number" required step="0.1" className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-mono text-lg focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" placeholder="0.0" value={formData.totalCurrent} onChange={e => setFormData({...formData, totalCurrent: e.target.value})} />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Resistive Current (uA)</label>
+                <input type="number" required step="0.1" className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-mono text-lg focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" placeholder="0.0" value={formData.resistiveCurrent} onChange={e => setFormData({...formData, resistiveCurrent: e.target.value})} />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Corrected Resistive (uA)</label>
+                <input type="number" required step="0.1" className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-mono text-lg font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" placeholder="0.0" value={formData.correctedResistiveCurrent} onChange={e => setFormData({...formData, correctedResistiveCurrent: e.target.value})} />
+              </div>
+            </div>
+          </div>
+          <button type="submit" className="w-full bg-blue-600 text-white py-4.5 rounded-2xl font-extrabold text-lg shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
+            <Save size={20} /> Commit Individual Measurement
+          </button>
+        </form>
+      ) : (
+        <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-4 gap-4">
+            <div>
+              <h3 className="font-extrabold text-slate-800">Batch Entry: <span className="text-blue-600">{bulkSubstation || 'Select Station First'}</span></h3>
+              <p className="text-xs text-slate-400 mt-1">Direct bulk processing for active substation register</p>
+            </div>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleXlsxImport} />
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                disabled={!bulkSubstation}
+                className="flex-1 sm:flex-none bg-emerald-50 text-emerald-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs font-bold border border-emerald-100 hover:bg-emerald-100 disabled:opacity-50 transition-all"
+              >
+                <Upload size={14} /> XLSX Import
+              </button>
+              <button 
+                onClick={() => setShowPasteModal(true)} 
+                disabled={!bulkSubstation}
+                className="flex-1 sm:flex-none bg-slate-50 hover:bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs font-bold border border-slate-200 disabled:opacity-50 transition-all"
+              >
+                <Clipboard size={14} /> Paste Tool
+              </button>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Common Batch Date</label>
+              <input type="date" className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                     value={bulkDate} onChange={e => setBulkDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Select Substation for Batch</label>
+              <select className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                      value={bulkSubstation} onChange={e => { setBulkSubstation(e.target.value); setBulkInputs({}); }}>
+                <option value="">-- Select Substation --</option>
+                {substations.filter(s => s !== 'All').map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {bulkSubstation && bulkEquipments.length > 0 && (
+            <div className="overflow-x-auto border border-slate-200 rounded-xl mt-6">
+              <table className="min-w-full text-sm text-left">
+                <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[9px] tracking-wider border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-3">Equipment Unit</th>
+                    <th className="px-4 py-3 text-center">Total (uA)</th>
+                    <th className="px-4 py-3 text-center">Resistive (uA)</th>
+                    <th className="px-4 py-3 text-center font-bold text-blue-600">Corrected (uA)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {bulkEquipments.map(eq => (
+                    <tr key={eq.id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-bold text-slate-700">{eq.name}</td>
+                      <td className="px-4 py-2">
+                        <input 
+                          type="number" step="0.1" 
+                          className="w-full text-center bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono outline-none focus:ring-1 focus:ring-blue-500"
+                          value={bulkInputs[eq.id]?.total || ''}
+                          onChange={e => handleBulkInputChange(eq.id, 'total', e.target.value)}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input 
+                          type="number" step="0.1" 
+                          className="w-full text-center bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono outline-none focus:ring-1 focus:ring-blue-500"
+                          value={bulkInputs[eq.id]?.resistive || ''}
+                          onChange={e => handleBulkInputChange(eq.id, 'resistive', e.target.value)}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input 
+                          type="number" step="0.1" 
+                          className="w-full text-center bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono font-bold text-blue-600 outline-none focus:ring-1 focus:ring-blue-500"
+                          value={bulkInputs[eq.id]?.corrected || ''}
+                          onChange={e => handleBulkInputChange(eq.id, 'corrected', e.target.value)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {bulkSubstation && bulkEquipments.length > 0 && (
+            <button 
+              onClick={handleBulkSubmit}
+              className="w-full mt-6 bg-blue-600 text-white py-4.5 rounded-2xl font-extrabold text-lg shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+            >
+              <Save size={20} /> Commit Batch Measurements
+            </button>
+          )}
+
+          {!bulkSubstation && (
+            <div className="py-20 text-center text-slate-400 italic">
+              Please select a substation to begin batch data entry.
+            </div>
+          )}
+        </div>
+      )}
+
+      {showPasteModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95">
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h3 className="text-xl font-extrabold text-slate-800">Paste Column Data</h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">
+                  Paste columns directly from spreadsheets (Excel, Google Sheets)
+                </p>
+              </div>
+              <button onClick={() => setShowPasteModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                <X size={20} className="text-slate-400" />
+              </button>
+            </div>
+            <div className="p-8 space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Equipment Unit Names</label>
+                  <textarea
+                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Paste equipment names, one per line"
+                    value={pastedColumns.names}
+                    onChange={e => setPastedColumns({...pastedColumns, names: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Total Current (uA)</label>
+                  <textarea
+                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Paste total currents, one per line"
+                    value={pastedColumns.totals}
+                    onChange={e => setPastedColumns({...pastedColumns, totals: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Resistive Current (uA)</label>
+                  <textarea
+                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Paste resistive currents, one per line"
+                    value={pastedColumns.resistive}
+                    onChange={e => setPastedColumns({...pastedColumns, resistive: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Corrected Resistive (uA)</label>
+                  <textarea
+                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Paste corrected resistive currents, one per line"
+                    value={pastedColumns.corrected}
+                    onChange={e => setPastedColumns({...pastedColumns, corrected: e.target.value})}
+                  />
+                </div>
+              </div>
+              <div className="flex gap-4 pt-4">
+                <button type="button" onClick={applyColumnPaste} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-extrabold shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all uppercase tracking-widest">
+                  Apply Pasted Data
+                </button>
+                <button type="button" onClick={() => setShowPasteModal(false)} className="px-10 bg-slate-100 text-slate-600 py-4 rounded-2xl font-bold uppercase tracking-widest">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default DataEntry;

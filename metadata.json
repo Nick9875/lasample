@@ -1,0 +1,7 @@
+{
+  "name": "Test for deployment of NVA ArresterGuard with AI",
+  "description": "An advanced Lightning Arrester leakage current monitoring and diagnostic tool with AI-powered trend analysis and health reporting.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
