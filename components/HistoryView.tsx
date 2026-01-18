@@ -95,12 +95,45 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
 
   const handleDelete = async (id: string) => {
     if (!isAdmin) return alert("Admin access required.");
-    if (confirm("Permanently delete this measurement record from the history log?")) {
-      const { error } = await supabase.from('readings').delete().eq('id', id);
-      if (error) {
-          alert("Error deleting record: " + error.message);
+
+    const readingToDelete = readings.find(r => r.id === id);
+    if (!readingToDelete) return;
+
+    const isActionLog = readingToDelete.notes?.includes('Action Taken');
+
+    let confirmMessage = isActionLog
+      ? "This is a classification event. Deleting it will also reset the equipment's status to be automatically calculated. Are you sure you want to delete this event log?"
+      : "Permanently delete this measurement record from the history log?";
+      
+    if (confirm(confirmMessage)) {
+      // If it's an action log, first reset the equipment override
+      if (isActionLog) {
+        const equipmentId = readingToDelete.equipmentId;
+        const { error: eqError } = await supabase
+          .from('equipment')
+          .update({ statusOverride: null })
+          .eq('id', equipmentId);
+
+        if (eqError) {
+          alert("Failed to reset equipment status override: " + eqError.message);
           return;
+        }
+        
+        // Update local state for equipment to trigger UI refresh
+        setEquipments(prev => prev.map(e => 
+          e.id === equipmentId ? { ...e, statusOverride: null } : e
+        ));
       }
+
+      // Then, delete the reading record itself
+      const { error: readingError } = await supabase.from('readings').delete().eq('id', id);
+
+      if (readingError) {
+        alert("Error deleting record: " + readingError.message);
+        return;
+      }
+
+      // Update local readings state
       setReadings(prev => prev.filter(r => r.id !== id));
     }
   };
