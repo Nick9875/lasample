@@ -5,7 +5,8 @@ import { Equipment, Reading, ThresholdSettings } from "../types";
 export const performAIDiagnostic = async (
   equipment: Equipment,
   readings: Reading[],
-  settings: ThresholdSettings
+  settings: ThresholdSettings,
+  additionalContext?: string
 ) => {
   // Always use process.env.API_KEY as a named parameter in the constructor.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -16,7 +17,9 @@ export const performAIDiagnostic = async (
     Readings History: ${JSON.stringify(readings)}
     Thresholds: Poor > ${settings.poorLimit}uA, Critical > ${settings.criticalLimit}uA.
 
-    Based on the trend of Corrected Resistive Current (uA), provide:
+    ${additionalContext ? `Technician's Field Observations / Additional Context: "${additionalContext}"` : ''}
+
+    Based on the trend of Corrected Resistive Current (uA) and any provided observations, provide:
     1. A summary of the current state.
     2. Identification of any dangerous trends (e.g., rapid increases).
     3. Recommended maintenance actions.
@@ -46,7 +49,8 @@ export const performAIDiagnostic = async (
 
 export const performAIComparison = async (
   items: { equipment: Equipment; readings: Reading[] }[],
-  settings: ThresholdSettings
+  settings: ThresholdSettings,
+  additionalContext?: string
 ) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
@@ -61,7 +65,9 @@ export const performAIComparison = async (
 
     Thresholds: Poor > ${settings.poorLimit}uA, Critical > ${settings.criticalLimit}uA.
 
-    Based on the trends of Corrected Resistive Current (uA) and equipment metadata, provide:
+    ${additionalContext ? `Technician's Field Observations / Additional Context: "${additionalContext}"` : ''}
+
+    Based on the trends of Corrected Resistive Current (uA), equipment metadata, and any provided observations, provide:
     1. A comparative health summary table or list.
     2. Analysis of the relative performance: identify which unit is degrading fastest.
     3. If units are of different brands/models, note any performance discrepancies.

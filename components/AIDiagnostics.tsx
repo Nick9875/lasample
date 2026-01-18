@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { ShieldAlert, Sparkles, Brain, Loader2, Thermometer, ShieldCheck, ArrowRightLeft, Search, CheckCircle2, X, Filter } from 'lucide-react';
+import { ShieldAlert, Sparkles, Brain, Loader2, Thermometer, ShieldCheck, ArrowRightLeft, Search, CheckCircle2, X, Filter, MessageSquareText } from 'lucide-react';
 import { Equipment, Reading, ThresholdSettings, HealthStatus } from '../types';
 import { performAIDiagnostic, performAIComparison } from '../services/geminiService';
 
@@ -17,6 +17,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
   const [compareSearch, setCompareSearch] = useState('');
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [additionalContext, setAdditionalContext] = useState('');
   
   // New Filter States
   const [filterVoltage, setFilterVoltage] = useState<string>('All');
@@ -122,7 +123,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
         return;
       }
       const history = readings.filter(r => r.equipmentId === selectedId);
-      const result = await performAIDiagnostic(eq, history, settings);
+      const result = await performAIDiagnostic(eq, history, settings, additionalContext);
       setDiagnostic(result);
       setIsLoading(false);
     } else {
@@ -136,7 +137,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
         return { equipment, readings: history };
       });
       
-      const result = await performAIComparison(items, settings);
+      const result = await performAIComparison(items, settings, additionalContext);
       setDiagnostic(result);
       setIsLoading(false);
     }
@@ -341,6 +342,20 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
                 </div>
               </>
             )}
+          </div>
+          
+          {/* New Context Text Area */}
+          <div className="mt-4 pt-4 border-t border-slate-100">
+             <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 uppercase mb-2">
+                <MessageSquareText size={12} className="text-blue-500" />
+                Additional Field Context
+             </label>
+             <textarea 
+               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none resize-none h-20 placeholder-slate-400"
+               placeholder="Enter specific observations, weather conditions, or maintenance notes to include in the AI analysis..."
+               value={additionalContext}
+               onChange={e => setAdditionalContext(e.target.value)}
+             />
           </div>
 
           <button 
