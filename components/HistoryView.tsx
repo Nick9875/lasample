@@ -89,7 +89,8 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
         return b.ratedVoltage - a.ratedVoltage; 
       }
       return a.name.localeCompare(b.name);
-    });
+    })
+    .slice(0, 9);
   }, [equipments, readings, searchTerm, statusFilter, ratedKVFilter]);
 
 
@@ -231,6 +232,10 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
             {ratedVoltageOptions.map(v => <option key={v} value={v}>{v} kV</option>)}
           </select>
         </div>
+      </div>
+
+      <div className="px-2 text-xs text-slate-500 font-bold uppercase tracking-wider">
+        Displaying top {filteredEquipments.length} matching equipment units
       </div>
 
       <div className="space-y-4">
