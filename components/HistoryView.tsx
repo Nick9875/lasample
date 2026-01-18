@@ -274,7 +274,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
                                <tr>
                                   <th className="px-4 py-2">Date</th>
                                   <th className="px-4 py-2">Event / Action Taken</th>
-                                  <th className="px-4 py-2 text-right">System Control</th>
+                                  <th className="px-4 py-2 text-right">Actions</th>
                                </tr>
                             </thead>
                             <tbody className="divide-y divide-amber-50/50">
@@ -288,7 +288,15 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
                                       </div>
                                    </td>
                                    <td className="px-4 py-2.5 text-right">
-                                     <span className="text-[9px] text-slate-400 font-medium italic">Logged Event</span>
+                                     {isAdmin && (
+                                       <button
+                                         onClick={() => handleDelete(r.id)}
+                                         className="p-1 text-slate-400 hover:text-rose-600 hover:bg-white rounded-lg transition-colors"
+                                         title="Delete Event Log"
+                                       >
+                                         <Trash2 size={12} />
+                                       </button>
+                                     )}
                                    </td>
                                  </tr>
                                ))}
