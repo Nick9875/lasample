@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { 
   LineChart as ReLineChart, 
@@ -526,13 +527,26 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
                   {selectedTrendIds.map((id, index) => {
                     const eq = equipments.find(e => e.id === id);
                     if (!eq) return null;
-                    const colors = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#f97316'];
-                    const color = colors[index % colors.length];
+                    
+                    // Define colors per measurement type
+                    const correctedColor = "#ef4444"; // red
+                    const resistiveColor = "#10b981"; // green
+                    const totalColor = "#3b82f6";   // blue
+
+                    // Use line style to differentiate between multiple selected equipments
+                    const lineStyles = [
+                      { }, // solid for first equipment
+                      { strokeDasharray: "8 4" }, // dashed for second
+                      { strokeDasharray: "2 6" }, // dotted for third
+                      { strokeDasharray: "8 4 2 4" }, // dash-dot for fourth
+                    ];
+                    const style = lineStyles[index % lineStyles.length];
+                    
                     return (
                       <React.Fragment key={id}>
-                        {chartOptions.showTotal && <Line type="monotone" dataKey={`${eq.name}_total`} name={`${eq.name} (Tot)`} stroke={color} strokeDasharray="5 5" strokeWidth={1} dot={{r: 2}} />}
-                        {chartOptions.showResistive && <Line type="monotone" dataKey={`${eq.name}_resistive`} name={`${eq.name} (Res)`} stroke={color} strokeWidth={1} dot={{r: 2}} />}
-                        {chartOptions.showCorrected && <Line type="monotone" dataKey={`${eq.name}_corrected`} name={`${eq.name} (Corr)`} stroke={color} strokeWidth={3} dot={{r: 4, strokeWidth: 2, fill: 'white'}} />}
+                        {chartOptions.showTotal && <Line type="monotone" dataKey={`${eq.name}_total`} name={`${eq.name} (Tot)`} stroke={totalColor} strokeWidth={2} dot={{r: 2}} {...style} />}
+                        {chartOptions.showResistive && <Line type="monotone" dataKey={`${eq.name}_resistive`} name={`${eq.name} (Res)`} stroke={resistiveColor} strokeWidth={2} dot={{r: 2}} {...style} />}
+                        {chartOptions.showCorrected && <Line type="monotone" dataKey={`${eq.name}_corrected`} name={`${eq.name} (Corr)`} stroke={correctedColor} strokeWidth={3} dot={{r: 4, strokeWidth: 2, fill: 'white'}} {...style} />}
                       </React.Fragment>
                     );
                   })}
