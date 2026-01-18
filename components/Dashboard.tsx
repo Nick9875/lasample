@@ -395,7 +395,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
               onChange={e => setTableRatedKVFilter(e.target.value === 'All' ? 'All' : parseFloat(e.target.value))}
             >
               <option value="All">All Rated kV</option>
-              {Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a,b) => a-b).map(kv => (
+              {Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: number, b: number) => a - b).map(kv => (
                 <option key={kv} value={kv}>{kv} kV</option>
               ))}
             </select>

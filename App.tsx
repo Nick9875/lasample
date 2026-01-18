@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
@@ -43,7 +42,18 @@ const DEFAULT_ADMIN: UserAccount = {
 
 const App: React.FC = () => {
   const [users, setUsers] = useState<UserAccount[]>([]);
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
+  
+  // Initialize currentUser from localStorage
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
+    try {
+      const stored = localStorage.getItem('arrester_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) {
+      console.error("Failed to restore session", e);
+      return null;
+    }
+  });
+
   const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [readings, setReadings] = useState<Reading[]>([]);
   const [settings, setSettings] = useState<ThresholdSettings>(INITIAL_THRESHOLD);
@@ -172,6 +182,7 @@ const App: React.FC = () => {
     const user = users.find(u => u.username === loginForm.username && u.password === loginForm.password);
     if (user) {
       setCurrentUser(user);
+      localStorage.setItem('arrester_user', JSON.stringify(user)); // Save user to localStorage
       setLoginError('');
       setLoginForm({ username: '', password: '' });
     } else {
@@ -181,6 +192,7 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setCurrentUser(null);
+    localStorage.removeItem('arrester_user'); // Clear user from localStorage
     setCurrentView('dashboard');
   };
 

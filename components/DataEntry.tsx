@@ -75,14 +75,17 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       ratedVoltage: eq.ratedVoltage || 0,
     };
 
-    const { error } = await supabase.from('readings').insert(reading);
-    if (error) {
-        alert("Failed to save reading: " + error.message);
-        return;
+    let syncSuccess = false;
+    try {
+        const { error } = await supabase.from('readings').insert(reading);
+        if (error) throw error;
+        syncSuccess = true;
+    } catch (error: any) {
+        console.warn("Cloud sync failed:", error);
     }
 
     addReading(reading);
-    alert("Individual reading recorded to database.");
+    alert(syncSuccess ? "Individual reading recorded to database." : "Network Error: Reading saved locally only.");
     setFormData({ ...formData, totalCurrent: '', resistiveCurrent: '', correctedResistiveCurrent: '' });
   };
 
@@ -114,16 +117,22 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       }
     });
 
-    const { error } = await supabase.from('readings').insert(batchReadings);
-
-    if (error) {
-        alert("Batch upload failed: " + error.message);
-        return;
+    let syncSuccess = false;
+    try {
+        const { error } = await supabase.from('readings').insert(batchReadings);
+        if (error) throw error;
+        syncSuccess = true;
+    } catch (error: any) {
+        console.warn("Cloud sync failed:", error);
     }
-
+    
     setReadings(prev => [...batchReadings, ...prev]);
-
-    alert(`Batch Complete: Successfully recorded ${batchReadings.length} units to database.`);
+    
+    if (syncSuccess) {
+        alert(`Batch Complete: Successfully recorded ${batchReadings.length} units to database.`);
+    } else {
+        alert(`Offline Mode: ${batchReadings.length} units saved locally. Check connection.`);
+    }
     setBulkInputs({});
   };
 
@@ -279,17 +288,23 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
         });
 
         if (successCount > 0) {
-           // Bulk Upsert Equipment
-           const { error: eqError } = await supabase.from('equipment').upsert(updatedEquipments);
-           if (eqError) throw new Error("Equipment sync failed: " + eqError.message);
+           let syncMsg = "Synchronized with database.";
+           try {
+               // Bulk Upsert Equipment
+               const { error: eqError } = await supabase.from('equipment').upsert(updatedEquipments);
+               if (eqError) throw eqError;
 
-           // Bulk Insert Readings
-           const { error: rdError } = await supabase.from('readings').insert(newReadings);
-           if (rdError) throw new Error("Reading sync failed: " + rdError.message);
+               // Bulk Insert Readings
+               const { error: rdError } = await supabase.from('readings').insert(newReadings);
+               if (rdError) throw rdError;
+           } catch (err: any) {
+               console.warn("Cloud sync failed:", err);
+               syncMsg = "Cloud sync failed (Offline Mode). Data stored locally.";
+           }
 
           setEquipments(updatedEquipments);
           setReadings(prev => [...newReadings, ...prev]);
-          alert(`Integration Complete:\n- Added ${successCount} measurement records.\n- Synchronized ${updatedEquipments.length} inventory items (${newAssetsCount} new assets).`);
+          alert(`Integration Complete (${syncMsg}):\n- Added ${successCount} measurement records.\n- Processed ${updatedEquipments.length} inventory items.`);
         } else {
           alert("No valid data found in the spreadsheet. Please verify columns.");
         }
