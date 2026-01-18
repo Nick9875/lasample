@@ -15,7 +15,9 @@ import {
   CheckCircle2,
   AlertCircle,
   ShieldOff,
-  Activity
+  Activity,
+  RefreshCw,
+  Lock
 } from 'lucide-react';
 import { Equipment, Reading, UserAccount, ThresholdSettings, View, HealthStatus, GlobalHealthStats } from './types';
 import Dashboard from './components/Dashboard';
@@ -42,7 +44,12 @@ const DEFAULT_ADMIN: UserAccount = {
 const App: React.FC = () => {
   const [users, setUsers] = useState<UserAccount[]>(() => {
     const saved = localStorage.getItem('la_users');
-    return saved ? JSON.parse(saved) : [DEFAULT_ADMIN];
+    const parsed = saved ? JSON.parse(saved) : [];
+    // Ensure there is at least one admin account
+    if (parsed.length === 0 || !parsed.find((u: UserAccount) => u.role === 'Admin')) {
+      return [DEFAULT_ADMIN];
+    }
+    return parsed;
   });
 
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
@@ -67,9 +74,9 @@ const App: React.FC = () => {
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [searchTerm] = useState(''); // This searchTerm is not used in App.tsx
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
+  const [showRecovery, setShowRecovery] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('la_users', JSON.stringify(users));
@@ -95,13 +102,40 @@ const App: React.FC = () => {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    const user = users.find(u => u.username === loginForm.username && u.password === loginForm.password);
+    // Use case-insensitive username check
+    const user = users.find(u => 
+      u.username.toLowerCase() === loginForm.username.toLowerCase() && 
+      u.password === loginForm.password
+    );
+    
     if (user) {
       setCurrentUser(user);
       setLoginError('');
       setLoginForm({ username: '', password: '' });
+      setShowRecovery(false);
     } else {
       setLoginError('Invalid username or password');
+      if (loginForm.username.toLowerCase() === 'admin') {
+        setShowRecovery(true);
+      }
+    }
+  };
+
+  const handleResetAdmin = () => {
+    if (confirm("Reset the 'admin' account password to 'admin123'? This will not affect other data.")) {
+      const updatedUsers = users.map(u => 
+        u.username.toLowerCase() === 'admin' ? { ...u, password: 'admin123' } : u
+      );
+      
+      // If 'admin' doesn't exist at all for some reason, re-add it
+      if (!updatedUsers.find(u => u.username.toLowerCase() === 'admin')) {
+        updatedUsers.push(DEFAULT_ADMIN);
+      }
+      
+      setUsers(updatedUsers);
+      alert("Admin password has been reset to: admin123");
+      setShowRecovery(false);
+      setLoginError('');
     }
   };
 
@@ -110,25 +144,22 @@ const App: React.FC = () => {
     setCurrentView('dashboard');
   };
 
-  // Helper function to get latest reading for a given equipment ID
   const getLatestReadingApp = (eqId: string) => {
     return readings
       .filter(r => r.equipmentId === eqId)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
   };
 
-  // Helper function to get status for equipment
   const getStatusApp = (eq: Equipment, latest?: Reading): HealthStatus => {
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
-    if (!latest) return 'Satisfactory'; // Default for equipment with no readings
+    if (!latest) return 'Satisfactory';
     const val = latest.correctedResistiveCurrent;
-    if (val === 0) return 'Probe Failure'; // Assuming 0 implies failure
+    if (val === 0) return 'Probe Failure';
     if (val > settings.criticalLimit) return 'Critical';
     if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';
   };
 
-  // Memoized global health statistics for the header
   const globalHealthStats: GlobalHealthStats = useMemo(() => {
     let satisfactory = 0;
     let poor = 0;
@@ -139,20 +170,10 @@ const App: React.FC = () => {
       const latest = getLatestReadingApp(eq.id);
       const status = getStatusApp(eq, latest);
       switch (status) {
-        case 'Satisfactory':
-          satisfactory++;
-          break;
-        case 'Poor':
-          poor++;
-          break;
-        case 'Critical':
-          critical++;
-          break;
-        case 'Probe Failure':
-          probeFailure++;
-          break;
-        default:
-          break;
+        case 'Satisfactory': satisfactory++; break;
+        case 'Poor': poor++; break;
+        case 'Critical': critical++; break;
+        case 'Probe Failure': probeFailure++; break;
       }
     });
 
@@ -189,41 +210,68 @@ const App: React.FC = () => {
             <p className="text-slate-400 mt-2">Professional Leakage Monitoring System</p>
           </div>
 
-          <form onSubmit={handleLogin} className="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
-            <div className="space-y-4">
+          <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
+            <form onSubmit={handleLogin} className="space-y-4">
               {loginError && (
-                <div className="p-3 bg-red-500/20 border border-red-500/30 text-red-400 text-sm rounded-lg text-center font-medium">
+                <div className="p-3 bg-red-500/20 border border-red-500/30 text-red-400 text-sm rounded-lg text-center font-medium animate-in fade-in slide-in-from-top-1">
                   {loginError}
                 </div>
               )}
+              
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Username</label>
-                <input 
-                  autoFocus
-                  required
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
-                  value={loginForm.username}
-                  onChange={e => setLoginForm({...loginForm, username: e.target.value})}
-                />
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                  <input 
+                    autoFocus
+                    required
+                    placeholder="Enter username"
+                    className="w-full pl-11 pr-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all placeholder:text-slate-600"
+                    value={loginForm.username}
+                    onChange={e => setLoginForm({...loginForm, username: e.target.value})}
+                  />
+                </div>
               </div>
+              
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Password</label>
-                <input 
-                  required
-                  type="password"
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
-                  value={loginForm.password}
-                  onChange={e => setLoginForm({...loginForm, password: e.target.value})}
-                />
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                  <input 
+                    required
+                    type="password"
+                    placeholder="Enter password"
+                    className="w-full pl-11 pr-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all placeholder:text-slate-600"
+                    value={loginForm.password}
+                    onChange={e => setLoginForm({...loginForm, password: e.target.value})}
+                  />
+                </div>
               </div>
+              
               <button 
                 type="submit"
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-blue-500/20 transition-all active:scale-[0.98]"
               >
                 Sign In
               </button>
-            </div>
-          </form>
+            </form>
+
+            {showRecovery && (
+              <div className="mt-6 pt-6 border-t border-slate-700/50 animate-in fade-in">
+                <p className="text-center text-xs text-slate-500 mb-3">Forgot the admin password?</p>
+                <button 
+                  onClick={handleResetAdmin}
+                  className="w-full py-2.5 rounded-lg border border-slate-700 text-slate-400 text-xs font-bold hover:bg-slate-700/50 hover:text-white transition-all flex items-center justify-center gap-2"
+                >
+                  <RefreshCw size={14} /> Restore Default Admin Credentials
+                </button>
+              </div>
+            )}
+          </div>
+          
+          <p className="text-center text-slate-600 text-[10px] mt-8 uppercase font-bold tracking-widest">
+            Licensed to N.V Allonar &copy; 2026
+          </p>
         </div>
       </div>
     );
@@ -231,10 +279,8 @@ const App: React.FC = () => {
 
   const isAdmin = currentUser.role === 'Admin';
   const isTechnician = currentUser.role === 'Technician';
-  // Technicians have write access to Equipment, Data Entry, and Dashboard actions
   const hasWriteAccess = isAdmin || isTechnician;
 
-  // Role 'Write' implies Admin OR Technician
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, role: 'All' },
     { id: 'equipment', label: 'Equipment Detail', icon: Database, role: 'All' },
@@ -269,7 +315,7 @@ const App: React.FC = () => {
       `}>
         <div className="p-6 flex items-center gap-2 mb-4">
           <Zap className="text-yellow-400" size={32} />
-          <span className="font-extrabold text-xl text-white">NVA ArresterGuard with AI</span>
+          <span className="font-extrabold text-xl text-white">NVA ArresterGuard</span>
         </div>
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto no-scrollbar">
@@ -298,7 +344,7 @@ const App: React.FC = () => {
             <div className="flex flex-col">
               <span className="text-white text-sm font-bold truncate max-w-[120px]">{currentUser.username}</span>
               <span className={`text-[10px] font-bold uppercase tracking-wider ${isAdmin ? 'text-blue-400' : isTechnician ? 'text-emerald-400' : 'text-slate-500'}`}>
-                {currentUser.role} Account
+                {currentUser.role}
               </span>
             </div>
             <button 
@@ -309,11 +355,6 @@ const App: React.FC = () => {
               <LogOut size={16} />
             </button>
           </div>
-          {isAdmin && (
-            <div className="mt-2 text-[10px] text-slate-600 text-center">
-              Copyright 2026 by N.V Allonar
-            </div>
-          )}
         </div>
       </aside>
 
@@ -323,55 +364,38 @@ const App: React.FC = () => {
             <button className="md:hidden p-2 text-slate-600" onClick={toggleSidebar}>
               <Menu size={24} />
             </button>
-            
-            {/* Health Monitoring Percentages */}
             <div className="flex flex-col">
               <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-400 mb-1">
-                 <Activity size={12} /> System Health Monitor
+                 <Activity size={12} /> System Health
               </div>
               <div className="flex items-center gap-3">
-                 <div className="flex items-center gap-1.5" title="Assets in Satisfactory Condition">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50"></div>
-                    <span className="text-sm font-extrabold text-slate-700">{healthyPercent}% Healthy</span>
-                 </div>
+                 <span className="text-sm font-extrabold text-slate-700">{healthyPercent}% Healthy</span>
                  <div className="w-px h-3 bg-slate-200"></div>
-                 <div className="flex items-center gap-1.5" title="Assets needing attention (Poor, Critical, Probe Fail)">
-                    <div className="w-2 h-2 rounded-full bg-rose-500 shadow-sm shadow-rose-500/50 animate-pulse"></div>
-                    <span className="text-sm font-extrabold text-slate-700">{atRiskPercent}% At Risk</span>
-                 </div>
-              </div>
-              <div className="w-full h-1 bg-slate-100 rounded-full mt-1 overflow-hidden flex">
-                 <div style={{ width: `${healthyPercent}%` }} className="bg-emerald-500 h-full transition-all duration-500"></div>
-                 <div style={{ width: `${atRiskPercent}%` }} className="bg-rose-500 h-full transition-all duration-500"></div>
+                 <span className="text-sm font-extrabold text-slate-700">{atRiskPercent}% At Risk</span>
               </div>
             </div>
           </div>
           
-          {/* Global Health Status in Header */}
           <div className="flex items-center gap-4 ml-auto">
-            <div className="hidden sm:flex bg-slate-100 p-2 rounded-xl items-center gap-2 text-xs font-medium text-slate-700">
-              <span className="text-[10px] font-bold uppercase tracking-wide">Total Assets:</span>
-              <span className="font-bold text-slate-900">{globalHealthStats.totalAssets}</span>
-            </div>
             <div className={`bg-white border p-2 rounded-xl flex items-center gap-2 text-xs font-medium 
                           ${globalHealthStats.atRisk > 0 ? 'border-rose-300 text-rose-700 shadow-sm' : 'border-emerald-200 text-emerald-700 shadow-sm'}`}>
               {globalHealthStats.atRisk > 0 ? (
                 <>
                   <AlertCircle size={16} className="text-rose-500" />
-                  <span className="text-[10px] font-bold uppercase tracking-wide">Action Required</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide">Attention</span>
                   <span className="font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded text-[10px]">{globalHealthStats.atRisk}</span>
                 </>
               ) : (
                 <>
                   <CheckCircle2 size={16} className="text-emerald-500" />
-                  <span className="text-[10px] font-bold uppercase tracking-wide">All Good!</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide">Operational</span>
                 </>
               )}
             </div>
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 no-scrollbar">
           <div className="max-w-7xl mx-auto">
             {currentView === 'dashboard' && (
               <Dashboard 
@@ -380,7 +404,7 @@ const App: React.FC = () => {
                 readings={readings}
                 setReadings={setReadings} 
                 settings={settings} 
-                searchTerm={searchTerm} 
+                searchTerm={''} 
                 isAdmin={hasWriteAccess}
               />
             )}
