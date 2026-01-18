@@ -89,8 +89,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
         return b.ratedVoltage - a.ratedVoltage; 
       }
       return a.name.localeCompare(b.name);
-    })
-    .slice(0, 9);
+    });
   }, [equipments, readings, searchTerm, statusFilter, ratedKVFilter]);
 
 
@@ -235,10 +234,10 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
       </div>
 
       <div className="px-2 text-xs text-slate-500 font-bold uppercase tracking-wider">
-        Displaying top {filteredEquipments.length} matching equipment units
+        Displaying {filteredEquipments.length} matching equipment units
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-4 max-h-[calc(100vh-22rem)] overflow-y-auto no-scrollbar pr-2">
         {filteredEquipments.length > 0 ? filteredEquipments.map(eq => {
           const isExpanded = expandedId === eq.id;
           const allEqReadings = readings.filter(r => r.equipmentId === eq.id);
