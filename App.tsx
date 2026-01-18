@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
@@ -479,6 +480,7 @@ const App: React.FC = () => {
                 readings={readings}
                 setReadings={setReadings}
                 isAdmin={hasWriteAccess} 
+                settings={settings}
               />
             )}
             {currentView === 'readings' && (
@@ -497,6 +499,7 @@ const App: React.FC = () => {
                 equipments={equipments}
                 setEquipments={setEquipments} 
                 isAdmin={hasWriteAccess}
+                settings={settings}
               />
             )}
             {currentView === 'ai-diagnostic' && (

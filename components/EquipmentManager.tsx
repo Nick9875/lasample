@@ -18,7 +18,7 @@ import {
   Calendar,
   Activity
 } from 'lucide-react';
-import { Equipment, Reading, HealthStatus } from '../types';
+import { Equipment, Reading, HealthStatus, ThresholdSettings } from '../types';
 import { formatDisplayDate } from '../utils/reports';
 import { supabase } from '../services/supabaseClient';
 
@@ -28,9 +28,10 @@ interface EquipmentManagerProps {
   readings: Reading[];
   setReadings: React.Dispatch<React.SetStateAction<Reading[]>>;
   isAdmin: boolean;
+  settings: ThresholdSettings;
 }
 
-const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEquipments, readings, setReadings, isAdmin }) => {
+const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEquipments, readings, setReadings, isAdmin, settings }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentEquipment, setCurrentEquipment] = useState<Partial<Equipment>>({});
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
@@ -88,8 +89,8 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     if (!latest) return 'Satisfactory'; 
     const val = Number(latest.correctedResistiveCurrent); 
     if (val === 0) return 'Probe Failure'; 
-    if (val > 500) return 'Critical';
-    if (val > 300) return 'Poor';
+    if (val > settings.criticalLimit) return 'Critical';
+    if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';
   };
 
@@ -124,7 +125,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
         latestReading: latest
       };
     });
-  }, [equipments, searchTerm, statusFilter, ratedVoltageFilter, readings]);
+  }, [equipments, searchTerm, statusFilter, ratedVoltageFilter, readings, settings]);
 
   const handleSaveEquipment = async (e: React.FormEvent) => {
     e.preventDefault();
