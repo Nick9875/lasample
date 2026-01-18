@@ -438,8 +438,9 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4 ml-auto">
-            <div className="hidden sm:flex bg-slate-100 p-2 rounded-xl items-center gap-2 text-xs font-medium text-slate-700">
-              <span className="text-[10px] font-bold uppercase tracking-wide">Total Assets:</span>
+            <div className="flex bg-slate-100 p-2 rounded-xl items-center gap-2 text-xs font-medium text-slate-700">
+              <Database size={14} className="text-slate-500"/>
+              <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wide">Assets:</span>
               <span className="font-bold text-slate-900">{globalHealthStats.totalAssets}</span>
             </div>
             <div className={`bg-white border p-2 rounded-xl flex items-center gap-2 text-xs font-medium 
@@ -447,13 +448,13 @@ const App: React.FC = () => {
               {globalHealthStats.atRisk > 0 ? (
                 <>
                   <AlertCircle size={16} className="text-rose-500" />
-                  <span className="text-[10px] font-bold uppercase tracking-wide">Action Required</span>
+                  <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wide">Action Required</span>
                   <span className="font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded text-[10px]">{globalHealthStats.atRisk}</span>
                 </>
               ) : (
                 <>
                   <CheckCircle2 size={16} className="text-emerald-500" />
-                  <span className="text-[10px] font-bold uppercase tracking-wide">All Good!</span>
+                  <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wide">All Good!</span>
                 </>
               )}
             </div>
@@ -480,7 +481,6 @@ const App: React.FC = () => {
                 readings={readings}
                 setReadings={setReadings}
                 isAdmin={hasWriteAccess} 
-                settings={settings}
               />
             )}
             {currentView === 'readings' && (
@@ -499,7 +499,6 @@ const App: React.FC = () => {
                 equipments={equipments}
                 setEquipments={setEquipments} 
                 isAdmin={hasWriteAccess}
-                settings={settings}
               />
             )}
             {currentView === 'ai-diagnostic' && (
