@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
@@ -20,8 +21,7 @@ import {
   X,
   ArrowRight,
   Edit,
-  BarChart3,
-  RefreshCw
+  BarChart3
 } from 'lucide-react';
 import { Equipment, Reading, UserAccount, ThresholdSettings, View, HealthStatus, GlobalHealthStats } from './types';
 import Dashboard from './components/Dashboard';
@@ -61,29 +61,10 @@ const App: React.FC = () => {
     }
   });
 
-  // Initialize Equipments from localStorage
-  const [equipments, setEquipments] = useState<Equipment[]>(() => {
-    try {
-      const stored = localStorage.getItem('arrester_equipments');
-      return stored ? JSON.parse(stored) : [];
-    } catch (e) {
-      return [];
-    }
-  });
-
-  // Initialize Readings from localStorage
-  const [readings, setReadings] = useState<Reading[]>(() => {
-    try {
-      const stored = localStorage.getItem('arrester_readings');
-      return stored ? JSON.parse(stored) : [];
-    } catch (e) {
-      return [];
-    }
-  });
-
+  const [equipments, setEquipments] = useState<Equipment[]>([]);
+  const [readings, setReadings] = useState<Reading[]>([]);
   const [settings, setSettings] = useState<ThresholdSettings>(INITIAL_THRESHOLD);
   const [loading, setLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -100,63 +81,6 @@ const App: React.FC = () => {
   // Navigation props
   const [targetEquipmentId, setTargetEquipmentId] = useState<string | null>(null);
   const [dashboardFilter, setDashboardFilter] = useState<'All' | 'At Risk'>('All');
-
-  // Persistence Effects - Safer write with try/catch
-  useEffect(() => {
-    try {
-      localStorage.setItem('arrester_equipments', JSON.stringify(equipments));
-    } catch (e) {
-      console.error("LocalStorage write failed (Quota Exceeded?)", e as any);
-    }
-  }, [equipments]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('arrester_readings', JSON.stringify(readings));
-    } catch (e) {
-      console.error("LocalStorage write failed (Quota Exceeded?)", e as any);
-    }
-  }, [readings]);
-
-  // Sync Function for Pending Data
-  const syncPendingData = async (currentEquipments: Equipment[], currentReadings: Reading[]) => {
-    const pendingEq = currentEquipments.filter(e => e.pendingSync);
-    const pendingRd = currentReadings.filter(r => r.pendingSync);
-
-    if (pendingEq.length === 0 && pendingRd.length === 0) return;
-
-    setIsSyncing(true);
-    console.log(`Syncing ${pendingEq.length} equipment and ${pendingRd.length} readings...`);
-
-    try {
-      if (pendingEq.length > 0) {
-          const cleanEq = pendingEq.map(({ pendingSync, ...rest }) => rest);
-          const { error } = await supabase.from('equipment').upsert(cleanEq);
-          if (!error) {
-              setEquipments(prev => prev.map(e => e.pendingSync ? { ...e, pendingSync: false } : e));
-          } else {
-              console.error("Equipment Sync Error:", error as any);
-          }
-      }
-
-      if (pendingRd.length > 0) {
-          // Chunk reading uploads
-          const cleanRd = pendingRd.map(({ pendingSync, ...rest }) => rest);
-          const chunkSize = 50;
-          for (let i = 0; i < cleanRd.length; i += chunkSize) {
-             const chunk = cleanRd.slice(i, i + chunkSize);
-             const { error } = await supabase.from('readings').upsert(chunk);
-             if (error) throw error;
-          }
-          // On success, update local state
-          setReadings(prev => prev.map(r => r.pendingSync ? { ...r, pendingSync: false } : r));
-      }
-    } catch (err) {
-      console.error("Sync Failed:", err as any);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
 
   // Load Data from Supabase & Setup Realtime Subscriptions
   useEffect(() => {
@@ -181,85 +105,15 @@ const App: React.FC = () => {
            setUsers([DEFAULT_ADMIN]);
         }
 
-        // 3. Fetch Equipment & Robust Merge
-        let finalEquipments = [...equipments];
+        // 3. Fetch Equipment
         const { data: eqData } = await supabase.from('equipment').select('*');
-        if (eqData) {
-           finalEquipments = (() => {
-             const dbMap = new Map(eqData.map(e => [e.id, e]));
-             const merged: Equipment[] = [];
-             const processedIds = new Set<string>();
+        if (eqData) setEquipments(eqData);
 
-             // Process Local items first
-             for (const localItem of equipments) {
-               processedIds.add(localItem.id);
-               const dbItem = dbMap.get(localItem.id);
-               
-               if (dbItem) {
-                 // Conflict: Prefer Local if it has pendingSync flag (was edited offline)
-                 // Otherwise, prefer DB as source of truth
-                 if (localItem.pendingSync) {
-                   merged.push(localItem);
-                 } else {
-                   merged.push(dbItem as Equipment);
-                 }
-               } else {
-                 // Only in Local (New item created offline)
-                 merged.push(localItem);
-               }
-             }
-
-             // Process DB items not in Local (New from other users)
-             for (const [id, dbItem] of dbMap) {
-               if (!processedIds.has(id)) {
-                 merged.push(dbItem as Equipment);
-               }
-             }
-             return merged;
-           })();
-           setEquipments(finalEquipments);
-        }
-
-        // 4. Fetch Readings & Robust Merge
-        let finalReadings = [...readings];
+        // 4. Fetch Readings
         const { data: readingData } = await supabase.from('readings').select('*');
-        if (readingData) {
-           finalReadings = (() => {
-             const dbMap = new Map(readingData.map(r => [r.id, r]));
-             const merged: Reading[] = [];
-             const processedIds = new Set<string>();
-
-             for (const localItem of readings) {
-               processedIds.add(localItem.id);
-               const dbItem = dbMap.get(localItem.id);
-               
-               if (dbItem) {
-                 if (localItem.pendingSync) {
-                   merged.push(localItem);
-                 } else {
-                   merged.push(dbItem as Reading);
-                 }
-               } else {
-                 merged.push(localItem);
-               }
-             }
-
-             for (const [id, dbItem] of dbMap) {
-               if (!processedIds.has(id)) {
-                 merged.push(dbItem as Reading);
-               }
-             }
-             
-             // Sort by date descending
-             return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-           })();
-           setReadings(finalReadings);
-        }
+        if (readingData) setReadings(readingData);
 
         setIsConnected(true);
-        // Attempt to sync any pending data we found in local storage
-        syncPendingData(finalEquipments, finalReadings);
-
       } catch (error) {
         console.error("Failed to fetch initial data", error);
         setIsConnected(false);
@@ -283,12 +137,7 @@ const App: React.FC = () => {
               return [...prev, payload.new as Equipment];
             });
           } else if (payload.eventType === 'UPDATE') {
-            setEquipments((prev) => prev.map((item) => {
-               if (item.id === payload.new.id) {
-                   return item.pendingSync ? item : (payload.new as Equipment);
-               }
-               return item;
-            }));
+            setEquipments((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Equipment : item)));
           } else if (payload.eventType === 'DELETE') {
             setEquipments((prev) => prev.filter((item) => item.id !== payload.old.id));
           }
@@ -301,15 +150,10 @@ const App: React.FC = () => {
           if (payload.eventType === 'INSERT') {
             setReadings((prev) => {
               if (prev.some(r => r.id === payload.new.id)) return prev;
-              return [payload.new as Reading, ...prev]; 
+              return [payload.new as Reading, ...prev]; // Add new reading to top
             });
           } else if (payload.eventType === 'UPDATE') {
-             setReadings((prev) => prev.map((item) => {
-               if (item.id === payload.new.id) {
-                   return item.pendingSync ? item : (payload.new as Reading);
-               }
-               return item;
-            }));
+            setReadings((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Reading : item)));
           } else if (payload.eventType === 'DELETE') {
             setReadings((prev) => prev.filter((item) => item.id !== payload.old.id));
           }
@@ -367,7 +211,7 @@ const App: React.FC = () => {
             qrbox: { width: 250, height: 250 },
             aspectRatio: 1.0
           },
-          (decodedText: string) => {
+          (decodedText) => {
             // Success
             const eq = equipments.find(e => e.id === decodedText);
             if (eq) {
@@ -380,7 +224,7 @@ const App: React.FC = () => {
               console.warn("Unknown code:", decodedText);
             }
           },
-          (errorMessage: any) => {
+          (errorMessage) => {
             // Ignore frame parse errors
           }
         ).catch((err) => {
@@ -482,7 +326,7 @@ const App: React.FC = () => {
   }, [globalHealthStats]);
 
 
-  if (loading && equipments.length === 0) { // Only show loader if we have NO data at all
+  if (loading) {
       return (
           <div className="min-h-screen bg-slate-900 flex items-center justify-center">
               <div className="text-center text-white">
@@ -540,12 +384,11 @@ const App: React.FC = () => {
                 Sign In
               </button>
             </div>
-            <div className="mt-4 flex justify-center flex-col items-center gap-1">
+            <div className="mt-4 flex justify-center">
                  {isConnected ? 
                     <span className="text-[10px] text-emerald-500 flex items-center gap-1"><Cloud size={12}/> Cloud Database Connected</span> : 
                     <span className="text-[10px] text-amber-500 flex items-center gap-1"><CloudOff size={12}/> Offline Mode / Connection Failed</span>
                  }
-                 {isSyncing && <span className="text-[10px] text-blue-400 flex items-center gap-1"><RefreshCw size={10} className="animate-spin"/> Syncing pending data...</span>}
             </div>
           </form>
         </div>
@@ -626,12 +469,6 @@ const App: React.FC = () => {
         </nav>
 
         <div className="p-4 border-t border-slate-800 space-y-2">
-          {isSyncing && (
-             <div className="px-3 py-2 bg-blue-900/50 rounded-lg flex items-center gap-2 text-[10px] text-blue-200 font-bold mb-2 animate-pulse">
-                <RefreshCw size={12} className="animate-spin" />
-                Syncing unsaved records...
-             </div>
-          )}
           <div className="flex items-center justify-between bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
             <div className="flex flex-col">
               <span className="text-white text-sm font-bold truncate max-w-[120px]">{currentUser.username}</span>
