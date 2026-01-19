@@ -61,7 +61,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [selectedTrendIds, setSelectedTrendIds] = useState<string[]>([]);
   const [trendSearch, setTrendSearch] = useState('');
   const [trendBrandFilter, setTrendBrandFilter] = useState('All');
-  const [trendVoltageFilter, setTrendVoltageFilter] = useState<string | 'All'>('All');
+  // Fixed: explicitly type as number | 'All' to match ratedVoltage type and parseFloat usage
+  const [trendVoltageFilter, setTrendVoltageFilter] = useState<number | 'All'>('All');
 
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null);
   const [activeResolutionId, setActiveResolutionId] = useState<string | null>(null);
@@ -100,7 +101,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
     if (!latest) return 'Satisfactory';
     const val = Number(latest.correctedResistiveCurrent); 
-    if (val === 0) return 'Probe Failure'; 
+    if (val <= 0) return 'Probe Failure'; 
     if (val > settings.criticalLimit) return 'Critical';
     if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';
@@ -180,8 +181,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         const matchesKV = tableRatedKVFilter === 'All' || item.ratedVoltage === tableRatedKVFilter;
         
         return matchesSearch && matchesStatus && matchesKV;
-      })
-      .slice(0, 6); // Limit rendered rows for performance
+      });
   }, [dashboardData, tableSearch, tableStatusFilter, tableRatedKVFilter]);
 
   const toggleTrendSelection = (id: string) => {
@@ -573,16 +573,16 @@ const Dashboard: React.FC<DashboardProps> = ({
             </select>
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse">
-            <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-widest border-b border-slate-100">
+        <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+          <table className="w-full text-left text-sm border-collapse relative">
+            <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-widest border-b border-slate-100 sticky top-0 z-10 shadow-sm">
               <tr>
-                <th className="px-6 py-4">Current Status</th>
-                <th className="px-6 py-4">Equipment Unit</th>
-                <th className="px-6 py-4">Substation</th>
-                <th className="px-6 py-4">Rated kV</th>
-                <th className="px-6 py-4 text-center">Corrected uA</th>
-                <th className="px-6 py-4 text-center">History</th>
+                <th className="px-6 py-4 bg-slate-50">Current Status</th>
+                <th className="px-6 py-4 bg-slate-50">Equipment Unit</th>
+                <th className="px-6 py-4 bg-slate-50">Substation</th>
+                <th className="px-6 py-4 bg-slate-50">Rated kV</th>
+                <th className="px-6 py-4 text-center bg-slate-50">Corrected uA</th>
+                <th className="px-6 py-4 text-center bg-slate-50">History</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -630,7 +630,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           </table>
         </div>
         <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex justify-between items-center text-[10px] font-bold text-slate-400">
-           <span>Displaying top {tableItems.length} matching assets</span>
+           <span>Displaying all matching assets</span>
            <button onClick={() => { setTableSearch(''); setTableStatusFilter('All'); setTableRatedKVFilter('All'); }} className="text-blue-600 hover:underline transition-colors font-bold uppercase">Reset Filters</button>
         </div>
       </div>

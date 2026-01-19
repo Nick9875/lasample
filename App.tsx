@@ -280,7 +280,7 @@ const App: React.FC = () => {
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
     if (!latest) return 'Satisfactory';
     const val = Number(latest.correctedResistiveCurrent);
-    if (val === 0) return 'Probe Failure';
+    if (val <= 0) return 'Probe Failure';
     if (val > settings.criticalLimit) return 'Critical';
     if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';
@@ -402,7 +402,7 @@ const App: React.FC = () => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, role: 'All' },
     { id: 'equipment', label: 'Equipment Detail', icon: Database, role: 'All' },
-    { id: 'readings', label: 'Batch Data Entry', icon: Zap, role: 'Write' },
+    { id: 'readings', label: 'Data Entry', icon: Zap, role: 'Write' },
     { id: 'history', label: 'History Archive', icon: HistoryIcon, role: 'All' },
     { id: 'ai-diagnostic', label: 'AI Diagnostic', icon: ShieldAlert, role: 'All' },
     { id: 'reports', label: 'Report Generator', icon: FileText, role: 'All' },

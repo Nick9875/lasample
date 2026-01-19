@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { ShieldAlert, Sparkles, Brain, Loader2, Thermometer, ShieldCheck, ArrowRightLeft, Search, CheckCircle2, X, Filter, MessageSquareText } from 'lucide-react';
 import { Equipment, Reading, ThresholdSettings, HealthStatus } from '../types';
@@ -37,7 +36,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
     if (!latest) return 'Satisfactory';
     const val = Number(latest.correctedResistiveCurrent);
-    if (val === 0) return 'Probe Failure';
+    if (val <= 0) return 'Probe Failure';
     if (val > settings.criticalLimit) return 'Critical';
     if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';

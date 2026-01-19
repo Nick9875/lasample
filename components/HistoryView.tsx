@@ -26,8 +26,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
     return ['All', ...uniqueVoltages.map(String)];
   }, [equipments]);
 
-  const getStatusForReading = (reading: Reading): 'Satisfactory' | 'Poor' | 'Critical' => {
+  const getStatusForReading = (reading: Reading): 'Satisfactory' | 'Poor' | 'Critical' | 'Probe Failure' => {
     const val = Number(reading.correctedResistiveCurrent);
+    if (val <= 0) return 'Probe Failure';
     if (val > settings.criticalLimit) return 'Critical';
     if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';
@@ -37,7 +38,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
     if (!latest) return 'Satisfactory'; 
     const val = Number(latest.correctedResistiveCurrent);
-    if (val === 0) return 'Probe Failure'; 
+    if (val <= 0) return 'Probe Failure'; 
     if (val > settings.criticalLimit) return 'Critical';
     if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';

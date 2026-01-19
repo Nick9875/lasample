@@ -1,4 +1,3 @@
-
 import { Equipment, Reading, ThresholdSettings, HealthStatus } from '../types';
 
 /**
@@ -33,9 +32,8 @@ export const calculateHealthStatus = (
   let criticalLimit = Number(settings?.criticalLimit);
   if (isNaN(criticalLimit)) criticalLimit = 100;
 
-  // 4. Handle Probe Failure (0.0 reading typically indicates sensor issue or disconnection)
-  // We check for exact 0 as it's the specific indicator for probe issues in this system.
-  if (val === 0) {
+  // 4. Handle Probe Failure (0.0 or negative reading typically indicates sensor issue or disconnection)
+  if (val <= 0) {
     return 'Probe Failure';
   }
 

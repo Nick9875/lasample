@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { FileText, FileSpreadsheet, Search, Check, Filter } from 'lucide-react';
 import { Equipment, Reading, ThresholdSettings } from '../types';
@@ -33,7 +32,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
       const eq = equipments.find(e => e.id === r.equipmentId);
       if (!eq) return false;
       
-      const status = r.correctedResistiveCurrent > settings.criticalLimit ? 'Critical' : r.correctedResistiveCurrent > settings.poorLimit ? 'Poor' : 'Satisfactory';
+      let status = 'Satisfactory';
+      if (r.correctedResistiveCurrent <= 0) status = 'Probe Failure';
+      else if (r.correctedResistiveCurrent > settings.criticalLimit) status = 'Critical';
+      else if (r.correctedResistiveCurrent > settings.poorLimit) status = 'Poor';
       
       return (
         (filters.district === 'All' || eq.district === filters.district) &&
@@ -63,7 +65,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
   const selectedData = useMemo(() => {
     return readings.filter(r => selectedReadingIds.has(r.id)).map(r => {
       const eq = equipments.find(e => e.id === r.equipmentId);
-      const status = r.correctedResistiveCurrent > settings.criticalLimit ? 'Critical' : r.correctedResistiveCurrent > settings.poorLimit ? 'Poor' : 'Satisfactory';
+      
+      let status = 'Satisfactory';
+      if (r.correctedResistiveCurrent <= 0) status = 'Probe Failure';
+      else if (r.correctedResistiveCurrent > settings.criticalLimit) status = 'Critical';
+      else if (r.correctedResistiveCurrent > settings.poorLimit) status = 'Poor';
+
       return {
         Date: formatDisplayDate(r.date),
         Equipment: eq?.name,
@@ -133,6 +140,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
             <option value="Satisfactory">Satisfactory</option>
             <option value="Poor">Poor</option>
             <option value="Critical">Critical</option>
+            <option value="Probe Failure">Probe Failure</option>
           </select>
         </div>
       </div>
