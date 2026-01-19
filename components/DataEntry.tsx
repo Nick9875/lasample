@@ -1,10 +1,11 @@
 
-import React, { useState, useMemo, useRef } from 'react';
-import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2 } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2, QrCode, Camera } from 'lucide-react';
 import { Equipment, Reading } from '../types';
 import { parseInputDate } from '../utils/reports';
 import * as XLSX from 'xlsx';
 import { supabase } from '../services/supabaseClient';
+import { Html5Qrcode } from 'html5-qrcode';
 
 interface DataEntryProps {
   equipments: Equipment[];
@@ -12,9 +13,10 @@ interface DataEntryProps {
   addReading: (r: Reading) => void;
   setReadings: React.Dispatch<React.SetStateAction<Reading[]>>;
   isAdmin: boolean;
+  currentUser?: any;
 }
 
-const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addReading, setReadings, isAdmin }) => {
+const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addReading, setReadings, isAdmin, currentUser }) => {
   const [activeTab, setActiveTab] = useState<'individual' | 'bulk'>('individual');
   const [filterDistrict, setFilterDistrict] = useState('');
   const [filterSubstation, setFilterSubstation] = useState('');
@@ -41,6 +43,11 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     corrected: ''
   });
 
+  // Scanner State
+  const [showScanner, setShowScanner] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+
+
   const districts = useMemo(() => Array.from(new Set(equipments.map(e => e.district))).sort(), [equipments]);
   const substationsForFilter = useMemo(() => {
     const filtered = filterDistrict ? equipments.filter(e => e.district === filterDistrict) : equipments;
@@ -59,6 +66,55 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     return equipments.find(item => item.id === formData.equipmentId);
   }, [equipments, formData.equipmentId]);
 
+
+  // Scanner Effect
+  useEffect(() => {
+    let html5QrCode: Html5Qrcode | null = null;
+    if (showScanner) {
+       const timer = setTimeout(() => {
+          if (!document.getElementById("reader")) return;
+          
+          html5QrCode = new Html5Qrcode("reader");
+          html5QrCode.start(
+            { facingMode: "environment" }, 
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 }
+            },
+            (decodedText) => {
+               // Success callback
+               const eq = equipments.find(e => e.id === decodedText);
+               if (eq) {
+                 setFormData(prev => ({ ...prev, equipmentId: eq.id }));
+                 // Auto set filters if needed to show context
+                 setFilterDistrict(eq.district);
+                 setFilterSubstation(eq.substation);
+                 
+                 setShowScanner(false);
+                 html5QrCode?.stop().catch(console.error);
+               } else {
+                 console.warn("Scanned code not found in inventory:", decodedText);
+                 // Optional: Toast or small alert
+               }
+            },
+            (errorMessage) => {
+               // parse error, ignore
+            }
+          ).catch(err => {
+             console.error("Error starting scanner", err);
+             setScannerError("Could not access camera. Ensure permissions are granted.");
+          });
+       }, 300); // small delay for modal transition
+    }
+
+    return () => {
+      if (html5QrCode && html5QrCode.isScanning) {
+        html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error);
+      }
+    };
+  }, [showScanner, equipments]);
+
+
   const handleIndividualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const eq = equipments.find(item => item.id === formData.equipmentId);
@@ -73,6 +129,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       correctedResistiveCurrent: parseFloat(formData.correctedResistiveCurrent) || 0,
       mcovRating: eq.mcovRating,
       ratedVoltage: eq.ratedVoltage || 0,
+      notes: currentUser ? `Recorded by: ${currentUser.username}` : ''
     };
 
     let syncSuccess = false;
@@ -113,6 +170,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
           correctedResistiveCurrent: parseFloat(vals.corrected) || 0,
           mcovRating: eq.mcovRating,
           ratedVoltage: eq.ratedVoltage || 0,
+          notes: currentUser ? `Recorded by: ${currentUser.username}` : ''
         });
       }
     });
@@ -283,6 +341,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
             correctedResistiveCurrent: parseFloat(row['Corrected (uA)'] || row['Corrected'] || 0),
             mcovRating: eq.mcovRating,
             ratedVoltage: eq.ratedVoltage,
+            notes: currentUser ? `Recorded by: ${currentUser.username}` : ''
           });
           successCount++;
         });
@@ -378,10 +437,20 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="md:col-span-2">
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Selected Arrester Unit</label>
-              <select required className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={formData.equipmentId} onChange={e => setFormData({...formData, equipmentId: e.target.value})}>
-                <option value="">-- Select Asset --</option>
-                {equipments.filter(e => !filterSubstation || e.substation === filterSubstation).map(e => <option key={e.id} value={e.id}>{e.name} • {e.substation}</option>)}
-              </select>
+              <div className="flex gap-2">
+                <select required className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={formData.equipmentId} onChange={e => setFormData({...formData, equipmentId: e.target.value})}>
+                  <option value="">-- Select Asset --</option>
+                  {equipments.filter(e => !filterSubstation || e.substation === filterSubstation).map(e => <option key={e.id} value={e.id}>{e.name} • {e.substation}</option>)}
+                </select>
+                <button 
+                  type="button" 
+                  onClick={() => setShowScanner(true)}
+                  className="px-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors border border-blue-100"
+                  title="Scan QR Code"
+                >
+                  <QrCode size={24} />
+                </button>
+              </div>
               {selectedEquipmentForIndividualEntry && (
                 <div className="mt-4 p-3 bg-slate-50 rounded-lg flex items-center justify-between text-xs text-slate-600 font-bold animate-in fade-in slide-in-from-bottom-1">
                   <div className="flex items-center gap-2">
@@ -583,6 +652,29 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* QR Scanner Modal */}
+      {showScanner && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[130] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
+             <div className="p-4 bg-slate-800 text-white flex justify-between items-center relative z-20">
+                <h3 className="font-bold flex items-center gap-2"><Camera size={18} /> Scan Asset Code</h3>
+                <button onClick={() => setShowScanner(false)} className="p-1 hover:bg-slate-700 rounded"><X size={20} /></button>
+             </div>
+             <div className="p-4 bg-black relative">
+                <div id="reader" className="w-full h-64 bg-slate-900 rounded overflow-hidden"></div>
+                {scannerError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 z-10 p-4 text-center">
+                    <p className="text-white text-sm">{scannerError}</p>
+                  </div>
+                )}
+             </div>
+             <div className="p-4 bg-white text-center text-xs text-slate-500">
+                Align the QR code within the frame to automatically select the equipment.
+             </div>
           </div>
         </div>
       )}

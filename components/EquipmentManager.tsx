@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, 
@@ -16,11 +15,16 @@ import {
   Save,
   Check,
   Calendar,
-  Activity
+  Activity,
+  QrCode,
+  Printer,
+  Eye
 } from 'lucide-react';
 import { Equipment, Reading, HealthStatus } from '../types';
 import { formatDisplayDate } from '../utils/reports';
 import { supabase } from '../services/supabaseClient';
+import { jsPDF } from 'jspdf';
+import QRCode from 'qrcode';
 
 interface EquipmentManagerProps {
   equipments: Equipment[];
@@ -28,13 +32,15 @@ interface EquipmentManagerProps {
   readings: Reading[];
   setReadings: React.Dispatch<React.SetStateAction<Reading[]>>;
   isAdmin: boolean;
+  initialEditId?: string | null;
+  currentUser?: any;
 }
 
-const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEquipments, readings, setReadings, isAdmin }) => {
+const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEquipments, readings, setReadings, isAdmin, initialEditId }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentEquipment, setCurrentEquipment] = useState<Partial<Equipment>>({});
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(initialEditId || null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
@@ -52,11 +58,26 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
   const [editingReadingId, setEditingReadingId] = useState<string | null>(null);
   const [tempReadingData, setTempReadingData] = useState<Partial<Reading>>({});
 
+  // QR Printing State
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [previewImages, setPreviewImages] = useState<{id: string, url: string, name: string, sub: string}[]>([]);
+
 
   const ratedVoltageOptions = useMemo(() => {
     const uniqueVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: number, b: number) => a - b);
     return ['All', ...uniqueVoltages.map(String)]; 
   }, [equipments]);
+
+  useEffect(() => {
+    if (initialEditId) {
+       const eq = equipments.find(e => e.id === initialEditId);
+       if (eq) {
+         setExpandedId(initialEditId);
+         // Optional: scroll into view logic could go here
+       }
+    }
+  }, [initialEditId, equipments]);
 
   useEffect(() => {
     if (currentEquipment.ratedVoltage !== undefined) {
@@ -240,9 +261,96 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     }
   };
 
-  // Function to synchronize mcovRating and ratedVoltage for all readings
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const generatePreview = async () => {
+    const idsToProcess = selectedIds.size > 0 ? Array.from(selectedIds) : filteredEquipmentsList.map(e => e.id);
+    const itemsToProcess = equipments.filter(e => idsToProcess.includes(e.id));
+    
+    if (itemsToProcess.length === 0) return alert("No equipment selected.");
+
+    const previews = await Promise.all(itemsToProcess.map(async (eq) => {
+        const url = await QRCode.toDataURL(eq.id, { margin: 1, width: 200 });
+        return { id: eq.id, url, name: eq.name, sub: eq.substation };
+    }));
+    
+    setPreviewImages(previews);
+    setShowPrintPreview(true);
+  };
+
+  const handlePrintQRs = async () => {
+    try {
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = 210;
+      
+      const qrSize = 38; // 1.5 inches roughly
+      const marginX = 20; 
+      const marginY = 20; 
+      const colSpacing = (pageWidth - (2 * marginX) - (3 * qrSize)) / 2;
+      const rowSpacing = 15;
+      
+      let col = 0;
+      let row = 0;
+      
+      doc.setFontSize(22);
+      doc.text("Asset QR Tags", marginX, 15);
+      
+      for (const item of previewImages) {
+        const xPos = marginX + (col * (qrSize + colSpacing));
+        const yPos = marginY + (row * (qrSize + rowSpacing + 15));
+        
+        doc.addImage(item.url, 'PNG', xPos, yPos, qrSize, qrSize);
+        
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.1);
+        doc.rect(xPos - 5, yPos - 5, qrSize + 10, qrSize + 20); 
+        
+        // Auto-scale Text Logic
+        const maxTextWidth = qrSize + 8;
+        let fontSize = 9;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(fontSize);
+        
+        while (doc.getTextWidth(item.name) > maxTextWidth && fontSize > 5) {
+            fontSize--;
+            doc.setFontSize(fontSize);
+        }
+        
+        const textY = yPos + qrSize + 4;
+        doc.text(item.name, xPos + (qrSize/2), textY, { align: "center" });
+        
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "normal");
+        const sub = doc.splitTextToSize(item.sub, maxTextWidth);
+        doc.text(sub, xPos + (qrSize/2), textY + 4, { align: "center" });
+        
+        col++;
+        if (col >= 3) {
+          col = 0;
+          row++;
+          if (row >= 5) {
+            row = 0;
+            doc.addPage();
+          }
+        }
+      }
+      
+      doc.save("ArresterGuard_Asset_Tags.pdf");
+      setShowPrintPreview(false);
+      
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate PDF. Check console.");
+    }
+  };
+
+  // Sync Metadata
   const handleSyncReadingsMetadata = () => {
-    // This functionality might be redundant with real-time DB but kept for local state consistency
     const updatedReadings = readings.map(reading => {
       const parentEquipment = equipments.find(eq => eq.id === reading.equipmentId);
       if (parentEquipment) {
@@ -254,7 +362,6 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
       }
       return reading;
     });
-
     setReadings(updatedReadings);
   };
 
@@ -276,6 +383,12 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
           {isAdmin && (
             <>
               <button 
+                onClick={generatePreview}
+                className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-lg transition-all active:scale-95 text-xs"
+              >
+                <Printer size={16} /> Print QRs ({selectedIds.size > 0 ? selectedIds.size : 'All'})
+              </button>
+              <button 
                 onClick={() => { setCurrentEquipment({ 
                   statusOverride: null, 
                   voltageLevel: '230kV', 
@@ -286,7 +399,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                 }); setIsEditing(true); }}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-lg shadow-blue-500/20 transition-all active:scale-95"
               >
-                <Plus size={18} /> New Asset Unit
+                <Plus size={18} /> New Asset
               </button>
             </>
           )}
@@ -333,18 +446,19 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
         </div>
       </div>
 
+      {/* CREATE/EDIT MODAL */}
       {isEditing && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-[95%] md:w-full max-w-2xl overflow-hidden animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <div className="p-6 md:p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50 sticky top-0 z-10">
               <div>
                 <h3 className="text-xl font-extrabold text-slate-800">{currentEquipment.id ? 'Modify Record' : 'Create New Asset'}</h3>
                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">Equipment Metadata Entry</p>
               </div>
               <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
             </div>
-            <form onSubmit={handleSaveEquipment} className="p-8 space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <form onSubmit={handleSaveEquipment} className="p-6 md:p-8 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Equipment Unit Name</label>
                   <input required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.name || ''} onChange={e => setCurrentEquipment({...currentEquipment, name: e.target.value})} />
@@ -404,18 +518,64 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
         </div>
       )}
 
-      {/* Grid/List View mapping remains the same, just showing the container */}
+      {/* PRINT PREVIEW MODAL */}
+      {showPrintPreview && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                <div>
+                   <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Eye size={20} className="text-blue-500"/> Print Preview</h3>
+                   <p className="text-xs text-slate-400 font-bold uppercase">Showing {previewImages.length} tags</p>
+                </div>
+                <button onClick={() => setShowPrintPreview(false)} className="p-2 hover:bg-slate-200 rounded-full"><X size={20} /></button>
+             </div>
+             <div className="flex-1 overflow-y-auto p-8 bg-slate-100">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                   {previewImages.map((img) => (
+                      <div key={img.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col items-center text-center">
+                         <img src={img.url} alt="QR Code" className="w-32 h-32 mb-2" />
+                         <div className="font-bold text-xs text-slate-800 break-words w-full">{img.name}</div>
+                         <div className="text-[10px] text-slate-500 uppercase font-bold mt-1 w-full truncate">{img.sub}</div>
+                      </div>
+                   ))}
+                </div>
+             </div>
+             <div className="p-6 border-t border-slate-100 bg-white flex justify-end gap-3 shrink-0">
+                <button onClick={() => setShowPrintPreview(false)} className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+                <button onClick={handlePrintQRs} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 flex items-center gap-2">
+                   <Printer size={18} /> Print PDF
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Grid/List View mapping */}
       <div className={`${viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6' : 'space-y-4'}`}>
         {filteredEquipmentsList.map(eq => {
           const isExpanded = expandedId === eq.id;
+          const isSelected = selectedIds.has(eq.id);
           const allEqReadings = readings.filter(r => r.equipmentId === eq.id);
           const filteredEqReadings = allEqReadings
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           
           return (
             <div key={eq.id} className={`bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-300 ${isExpanded ? 'ring-2 ring-blue-500' : 'hover:shadow-md'}`}>
-              <div className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-start gap-4">
+              <div className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 relative">
+                
+                {/* Selection Checkbox */}
+                {isAdmin && (
+                  <div className="absolute top-4 left-4 md:static md:mr-2">
+                     <input 
+                       type="checkbox" 
+                       checked={isSelected}
+                       onChange={() => toggleSelect(eq.id)}
+                       className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                     />
+                  </div>
+                )}
+
+                <div className="flex items-start gap-4 ml-8 md:ml-0">
                   <div className={`p-3 rounded-2xl ${isExpanded ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}>
                     <Zap size={24} />
                   </div>

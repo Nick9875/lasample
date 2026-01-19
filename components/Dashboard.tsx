@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LineChart as ReLineChart, 
   Line, 
@@ -39,6 +39,8 @@ interface DashboardProps {
   settings: ThresholdSettings;
   searchTerm: string;
   isAdmin: boolean;
+  initialTargetId?: string | null;
+  initialStatusFilter?: 'All' | 'At Risk';
 }
 
 interface DashboardItem extends Equipment {
@@ -46,7 +48,17 @@ interface DashboardItem extends Equipment {
   status: HealthStatus;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readings, setReadings, settings, searchTerm, isAdmin }) => {
+const Dashboard: React.FC<DashboardProps> = ({ 
+  equipments, 
+  setEquipments, 
+  readings, 
+  setReadings, 
+  settings, 
+  searchTerm, 
+  isAdmin,
+  initialTargetId,
+  initialStatusFilter
+}) => {
   const [selectedTrendIds, setSelectedTrendIds] = useState<string[]>([]);
   const [trendSearch, setTrendSearch] = useState('');
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null);
@@ -61,6 +73,26 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
     showResistive: true, 
     showCorrected: true 
   });
+
+  // Handle Deep Links (from QR or Header)
+  useEffect(() => {
+    if (initialTargetId) {
+        setSelectedTrendIds([initialTargetId]);
+        setTimeout(() => {
+            const element = document.getElementById('trend-analysis-section');
+            if (element) {
+              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 500);
+    }
+  }, [initialTargetId]);
+
+  useEffect(() => {
+    if (initialStatusFilter) {
+        setTableStatusFilter(initialStatusFilter);
+    }
+  }, [initialStatusFilter]);
+
 
   const getStatus = (eq: Equipment, latest?: Reading): HealthStatus => {
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
@@ -144,7 +176,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
         
         return matchesSearch && matchesStatus && matchesKV;
       })
-      .slice(0, 6);
+      .slice(0, 100); // Limit rendered rows for performance
   }, [dashboardData, tableSearch, tableStatusFilter, tableRatedKVFilter]);
 
   const toggleTrendSelection = (id: string) => {
@@ -209,13 +241,18 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
 
   const chartData = useMemo(() => {
     if (selectedTrendIds.length === 0) return [];
-    const selectedReadings = readings.filter(r => selectedTrendIds.includes(r.equipmentId));
-    const dates = Array.from(new Set(selectedReadings.map(r => r.date))).sort();
     
-    return dates.map((date: string) => {
+    // Get all readings for selected equipment
+    const selectedReadings = readings.filter(r => selectedTrendIds.includes(r.equipmentId));
+    
+    // Sort all dates
+    const allDates = Array.from(new Set(selectedReadings.map(r => r.date))).sort();
+    
+    return allDates.map((date: string) => {
       const entry: Record<string, any> = { date: formatDisplayDate(date) }; 
+      
       selectedTrendIds.forEach(id => {
-        const r = readings.find(read => read.equipmentId === id && read.date === date);
+        const r = selectedReadings.find(read => read.equipmentId === id && read.date === date);
         const eq = equipments.find(e => e.id === id);
         if (r && eq) {
           if (chartOptions.showTotal) entry[`${eq.name}_total`] = r.totalCurrent;

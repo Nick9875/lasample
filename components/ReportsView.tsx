@@ -17,7 +17,8 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
     district: 'All',
     substation: 'All',
     brand: 'All',
-    model: 'All'
+    model: 'All',
+    status: 'All'
   });
 
   const [selectedReadingIds, setSelectedReadingIds] = useState<Set<string>>(new Set());
@@ -31,14 +32,18 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
     return readings.filter(r => {
       const eq = equipments.find(e => e.id === r.equipmentId);
       if (!eq) return false;
+      
+      const status = r.correctedResistiveCurrent > settings.criticalLimit ? 'Critical' : r.correctedResistiveCurrent > settings.poorLimit ? 'Poor' : 'Satisfactory';
+      
       return (
         (filters.district === 'All' || eq.district === filters.district) &&
         (filters.substation === 'All' || eq.substation === filters.substation) &&
         (filters.brand === 'All' || eq.brand === filters.brand) &&
-        (filters.model === 'All' || eq.model === filters.model)
+        (filters.model === 'All' || eq.model === filters.model) &&
+        (filters.status === 'All' || status === filters.status)
       );
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [readings, equipments, filters]);
+  }, [readings, equipments, filters, settings]);
 
   const toggleAll = () => {
     if (selectedReadingIds.size === filteredReadings.length && filteredReadings.length > 0) {
@@ -96,7 +101,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
         </div>
       </div>
 
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-5 gap-4">
         <div>
           <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">District</label>
           <select className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none shadow-sm focus:ring-2 focus:ring-blue-500" value={filters.district} onChange={e => setFilters({...filters, district: e.target.value})}>
@@ -119,6 +124,15 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
           <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Model</label>
           <select className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none shadow-sm focus:ring-2 focus:ring-blue-500" value={filters.model} onChange={e => setFilters({...filters, model: e.target.value})}>
             {models.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Measurement Status</label>
+          <select className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none shadow-sm focus:ring-2 focus:ring-blue-500" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})}>
+            <option value="All">All Statuses</option>
+            <option value="Satisfactory">Satisfactory</option>
+            <option value="Poor">Poor</option>
+            <option value="Critical">Critical</option>
           </select>
         </div>
       </div>

@@ -12,11 +12,16 @@ import {
   Database,
   Users,
   CheckCircle2,
-  AlertCircle,
+  AlertCircle, 
   Activity,
   Cloud,
   CloudOff,
-  Loader2
+  Loader2,
+  QrCode,
+  X,
+  ArrowRight,
+  Edit,
+  BarChart3
 } from 'lucide-react';
 import { Equipment, Reading, UserAccount, ThresholdSettings, View, HealthStatus, GlobalHealthStats } from './types';
 import Dashboard from './components/Dashboard';
@@ -28,6 +33,7 @@ import SettingsView from './components/SettingsView';
 import ReportsView from './components/ReportsView';
 import UserManagement from './components/UserManagement';
 import { supabase } from './services/supabaseClient';
+import { Html5Qrcode } from 'html5-qrcode';
 
 const INITIAL_THRESHOLD: ThresholdSettings = {
   poorLimit: 300,
@@ -62,10 +68,19 @@ const App: React.FC = () => {
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [searchTerm] = useState('');
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
+
+  // Global QR State
+  const [showGlobalScanner, setShowGlobalScanner] = useState(false);
+  const [scannedEquipmentId, setScannedEquipmentId] = useState<string | null>(null);
+  const [showActionModal, setShowActionModal] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  
+  // Navigation props
+  const [targetEquipmentId, setTargetEquipmentId] = useState<string | null>(null);
+  const [dashboardFilter, setDashboardFilter] = useState<'All' | 'At Risk'>('All');
 
   // Load Data from Supabase & Setup Realtime Subscriptions
   useEffect(() => {
@@ -176,6 +191,58 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // Global Scanner Effect
+  useEffect(() => {
+    let html5QrCode: Html5Qrcode | null = null;
+    
+    if (showGlobalScanner) {
+      setScannerError(null);
+      // Small delay to ensure modal DOM is ready
+      const timer = setTimeout(() => {
+        const elementId = "global-reader";
+        if (!document.getElementById(elementId)) return;
+
+        html5QrCode = new Html5Qrcode(elementId);
+        
+        html5QrCode.start(
+          { facingMode: "environment" }, // Prefer rear camera
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+          },
+          (decodedText) => {
+            // Success
+            const eq = equipments.find(e => e.id === decodedText);
+            if (eq) {
+              setScannedEquipmentId(eq.id);
+              setShowGlobalScanner(false);
+              setShowActionModal(true);
+              html5QrCode?.stop().catch(console.error);
+            } else {
+              // Could add a toast here for invalid code
+              console.warn("Unknown code:", decodedText);
+            }
+          },
+          (errorMessage) => {
+            // Ignore frame parse errors
+          }
+        ).catch(err => {
+          console.error("Error starting scanner:", err);
+          setScannerError("Camera access failed. Please ensure permissions are granted and you are using HTTPS.");
+        });
+      }, 300);
+
+      return () => {
+        clearTimeout(timer);
+        if (html5QrCode && html5QrCode.isScanning) {
+          html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error);
+        }
+      };
+    }
+  }, [showGlobalScanner, equipments]);
+
+
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
   const handleLogin = (e: React.FormEvent) => {
@@ -195,6 +262,13 @@ const App: React.FC = () => {
     setCurrentUser(null);
     localStorage.removeItem('arrester_user'); // Clear user from localStorage
     setCurrentView('dashboard');
+  };
+
+  const handleNavigateFromQR = (view: 'equipment' | 'dashboard') => {
+    setTargetEquipmentId(scannedEquipmentId);
+    setCurrentView(view);
+    setShowActionModal(false);
+    setScannedEquipmentId(null);
   };
 
   const getLatestReadingApp = (eqId: string) => {
@@ -364,12 +438,22 @@ const App: React.FC = () => {
         </div>
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto no-scrollbar">
+          {/* Global Scanner Button */}
+          <button
+             onClick={() => { setIsSidebarOpen(false); setShowGlobalScanner(true); }}
+             className="flex items-center w-full px-4 py-3 mb-2 rounded-lg text-sm font-bold bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg hover:from-blue-500 hover:to-blue-600 transition-all"
+          >
+             <QrCode size={20} className="mr-3" />
+             Scan Asset QR
+          </button>
+
           {filteredMenuItems.map((item) => (
             <button
               key={item.id}
               onClick={() => {
                 setCurrentView(item.id as View);
                 setIsSidebarOpen(false);
+                setTargetEquipmentId(null); // Clear any previous deep links
               }}
               className={`
                 flex items-center w-full px-4 py-3 rounded-lg text-sm font-medium transition-colors
@@ -414,7 +498,10 @@ const App: React.FC = () => {
             </button>
             
             <div className="flex flex-col">
-              <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-400 mb-1">
+              <div 
+                onClick={() => { setCurrentView('dashboard'); setDashboardFilter('All'); }}
+                className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-400 mb-1 cursor-pointer hover:text-blue-600 transition-colors"
+              >
                  <Activity size={12} /> System Health Monitor
               </div>
               <div className="flex items-center gap-3">
@@ -441,8 +528,11 @@ const App: React.FC = () => {
               <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wide">Assets:</span>
               <span className="font-bold text-slate-900">{globalHealthStats.totalAssets}</span>
             </div>
-            <div className={`bg-white border p-2 rounded-xl flex items-center gap-2 text-xs font-medium 
-                          ${globalHealthStats.atRisk > 0 ? 'border-rose-300 text-rose-700 shadow-sm' : 'border-emerald-200 text-emerald-700 shadow-sm'}`}>
+            <div 
+              onClick={() => { setCurrentView('dashboard'); setDashboardFilter('At Risk'); }}
+              className={`bg-white border p-2 rounded-xl flex items-center gap-2 text-xs font-medium cursor-pointer transition-all active:scale-95
+                          ${globalHealthStats.atRisk > 0 ? 'border-rose-300 text-rose-700 shadow-sm hover:bg-rose-50' : 'border-emerald-200 text-emerald-700 shadow-sm hover:bg-emerald-50'}`}
+            >
               {globalHealthStats.atRisk > 0 ? (
                 <>
                   <AlertCircle size={16} className="text-rose-500" />
@@ -468,8 +558,10 @@ const App: React.FC = () => {
                 readings={readings}
                 setReadings={setReadings} 
                 settings={settings} 
-                searchTerm={searchTerm} 
+                searchTerm={''} 
                 isAdmin={hasWriteAccess}
+                initialTargetId={targetEquipmentId}
+                initialStatusFilter={dashboardFilter}
               />
             )}
             {currentView === 'equipment' && (
@@ -479,6 +571,8 @@ const App: React.FC = () => {
                 readings={readings}
                 setReadings={setReadings}
                 isAdmin={hasWriteAccess} 
+                initialEditId={targetEquipmentId}
+                currentUser={currentUser}
               />
             )}
             {currentView === 'readings' && (
@@ -488,6 +582,7 @@ const App: React.FC = () => {
                 addReading={(r) => setReadings(prev => [r, ...prev])} 
                 setReadings={setReadings}
                 isAdmin={hasWriteAccess}
+                currentUser={currentUser}
               />
             )}
             {currentView === 'history' && (
@@ -544,6 +639,85 @@ const App: React.FC = () => {
           </div>
         </main>
       </div>
+
+      {/* Global QR Scanner Modal */}
+      {showGlobalScanner && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
+             <div className="p-4 bg-slate-800 text-white flex justify-between items-center relative z-20">
+                <h3 className="font-bold flex items-center gap-2"><QrCode size={18} /> Scan Asset Tag</h3>
+                <button onClick={() => setShowGlobalScanner(false)} className="p-1 hover:bg-slate-700 rounded"><X size={20} /></button>
+             </div>
+             <div className="p-4 bg-black relative">
+                <div id="global-reader" className="w-full h-72 bg-slate-900 rounded overflow-hidden"></div>
+                
+                {scannerError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 z-10 p-6 text-center">
+                    <div>
+                      <ShieldAlert className="mx-auto text-rose-500 mb-2" size={32} />
+                      <p className="text-white text-sm font-bold mb-1">Camera Access Error</p>
+                      <p className="text-slate-400 text-xs">{scannerError}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {!scannerError && (
+                  <p className="text-center text-xs text-slate-400 mt-2 absolute bottom-2 left-0 right-0 z-10 pointer-events-none">Align QR code within the frame</p>
+                )}
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Action Selection Modal */}
+      {showActionModal && scannedEquipmentId && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95">
+             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+               <div>
+                 <h3 className="text-lg font-bold text-slate-800">Asset Detected</h3>
+                 <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">
+                   {equipments.find(e => e.id === scannedEquipmentId)?.name || 'Unknown Asset'}
+                 </p>
+               </div>
+               <button onClick={() => { setShowActionModal(false); setScannedEquipmentId(null); }} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
+             </div>
+             <div className="p-8 grid grid-cols-1 gap-4">
+                <button 
+                  onClick={() => handleNavigateFromQR('equipment')}
+                  className="group flex items-center justify-between p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-500 hover:bg-blue-50 transition-all text-left"
+                >
+                   <div className="flex items-center gap-4">
+                      <div className="p-3 bg-blue-100 text-blue-600 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                        <Edit size={24} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-800 group-hover:text-blue-700">Edit Equipment Metadata</h4>
+                        <p className="text-xs text-slate-500">Modify properties, location, or ratings</p>
+                      </div>
+                   </div>
+                   <ArrowRight size={20} className="text-slate-300 group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
+                </button>
+
+                <button 
+                  onClick={() => handleNavigateFromQR('dashboard')}
+                  className="group flex items-center justify-between p-4 rounded-2xl border-2 border-slate-100 hover:border-emerald-500 hover:bg-emerald-50 transition-all text-left"
+                >
+                   <div className="flex items-center gap-4">
+                      <div className="p-3 bg-emerald-100 text-emerald-600 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                        <BarChart3 size={24} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-800 group-hover:text-emerald-700">Operational Health Overview</h4>
+                        <p className="text-xs text-slate-500">View live status, trends, and history</p>
+                      </div>
+                   </div>
+                   <ArrowRight size={20} className="text-slate-300 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all" />
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
