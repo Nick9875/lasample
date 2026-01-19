@@ -360,13 +360,26 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
 
       doc.addImage(item.dataUrl, 'PNG', x, y, qrSize, qrSize);
       
-      // Add Label
-      doc.setFontSize(8);
+      // Auto-resize Equipment Name to fit
       doc.setFont("helvetica", "bold");
-      doc.text(item.name.substring(0, 18), x + qrSize / 2, y + qrSize + 4, { align: 'center' });
-      doc.setFontSize(7);
+      let fontSize = 9;
+      doc.setFontSize(fontSize);
+      
+      // Calculate available width for text (approx QR width plus a small margin)
+      const maxTextWidth = qrSize + 4; 
+      
+      // Iteratively reduce font size until text fits or hits minimum
+      while (doc.getTextWidth(item.name) > maxTextWidth && fontSize > 4) {
+        fontSize -= 0.5;
+        doc.setFontSize(fontSize);
+      }
+      
+      doc.text(item.name, x + qrSize / 2, y + qrSize + 4, { align: 'center' });
+      
+      // Substation (smaller font)
+      doc.setFontSize(6);
       doc.setFont("helvetica", "normal");
-      doc.text(item.substation.substring(0, 20), x + qrSize / 2, y + qrSize + 8, { align: 'center' });
+      doc.text(item.substation.substring(0, 25), x + qrSize / 2, y + qrSize + 8, { align: 'center' });
 
       col++;
       if (col >= cols) {
