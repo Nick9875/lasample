@@ -288,57 +288,81 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     try {
       const doc = new jsPDF('p', 'mm', 'a4');
       const pageWidth = 210;
+      const pageHeight = 297;
       
-      const qrSize = 38; // 1.5 inches roughly
-      const marginX = 20; 
-      const marginY = 20; 
-      const colSpacing = (pageWidth - (2 * marginX) - (3 * qrSize)) / 2;
-      const rowSpacing = 15;
+      // Configuration for 4x5 grid (20 items per page)
+      const cols = 4;
+      const rows = 5;
+      const marginX = 10;
+      const marginY = 15; // Top margin start
+      const titleHeight = 15; // Space for title at top of each page
       
-      let col = 0;
-      let row = 0;
+      const availableWidth = pageWidth - (2 * marginX);
+      const availableHeight = pageHeight - (2 * marginY) - titleHeight;
       
-      doc.setFontSize(22);
-      doc.text("Asset QR Tags", marginX, 15);
+      const colWidth = availableWidth / cols;
+      const rowHeight = availableHeight / rows;
       
-      for (const item of previewImages) {
-        const xPos = marginX + (col * (qrSize + colSpacing));
-        const yPos = marginY + (row * (qrSize + rowSpacing + 15));
+      // QR Size calculation to ensure fit with padding
+      // Keep some padding for text (approx 20mm height reserved for text)
+      const qrSize = Math.min(colWidth - 10, rowHeight - 25); 
+      const itemsPerPage = cols * rows;
+      
+      for (let i = 0; i < previewImages.length; i++) {
+        const item = previewImages[i];
         
-        doc.addImage(item.url, 'PNG', xPos, yPos, qrSize, qrSize);
+        // Check if we need to add a new page
+        if (i > 0 && i % itemsPerPage === 0) {
+          doc.addPage();
+        }
         
-        doc.setDrawColor(200, 200, 200);
+        // Calculate position
+        const indexOnPage = i % itemsPerPage;
+        const colIndex = indexOnPage % cols;
+        const rowIndex = Math.floor(indexOnPage / cols);
+        
+        // Add Header on each page
+        if (indexOnPage === 0) {
+             doc.setFontSize(16);
+             doc.setFont("helvetica", "bold");
+             doc.text("Asset QR Tags", pageWidth / 2, marginY, { align: "center" });
+        }
+
+        // Calculate item slot position
+        const slotX = marginX + (colIndex * colWidth);
+        const slotY = marginY + titleHeight + (rowIndex * rowHeight);
+        
+        // Draw Border for cutting guide (light gray)
+        doc.setDrawColor(220, 220, 220);
         doc.setLineWidth(0.1);
-        doc.rect(xPos - 5, yPos - 5, qrSize + 10, qrSize + 20); 
+        doc.rect(slotX + 1, slotY + 1, colWidth - 2, rowHeight - 2); 
         
-        // Auto-scale Text Logic
-        const maxTextWidth = qrSize + 8;
-        let fontSize = 9;
+        // Center content in slot
+        const centerX = slotX + (colWidth / 2);
+        const qrY = slotY + 5; // Top padding inside slot
+        
+        // Draw QR
+        doc.addImage(item.url, 'PNG', centerX - (qrSize / 2), qrY, qrSize, qrSize);
+        
+        // Text positioning
+        const textYStart = qrY + qrSize + 5;
+        
+        // Name (Bold)
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(fontSize);
+        doc.setFontSize(9);
+        const nameLines = doc.splitTextToSize(item.name, colWidth - 6);
+        doc.text(nameLines, centerX, textYStart, { align: "center" });
         
-        while (doc.getTextWidth(item.name) > maxTextWidth && fontSize > 5) {
-            fontSize--;
-            doc.setFontSize(fontSize);
-        }
-        
-        const textY = yPos + qrSize + 4;
-        doc.text(item.name, xPos + (qrSize/2), textY, { align: "center" });
-        
-        doc.setFontSize(7);
+        // Substation (Regular, smaller)
+        const nameHeight = nameLines.length * 4; // approx line height
         doc.setFont("helvetica", "normal");
-        const sub = doc.splitTextToSize(item.sub, maxTextWidth);
-        doc.text(sub, xPos + (qrSize/2), textY + 4, { align: "center" });
+        doc.setFontSize(8);
+        doc.setTextColor(80);
+        const subLines = doc.splitTextToSize(item.sub, colWidth - 6);
+        doc.text(subLines, centerX, textYStart + nameHeight + 1, { align: "center" });
         
-        col++;
-        if (col >= 3) {
-          col = 0;
-          row++;
-          if (row >= 5) {
-            row = 0;
-            doc.addPage();
-          }
-        }
+        // Reset color
+        doc.setTextColor(0);
       }
       
       doc.save("ArresterGuard_Asset_Tags.pdf");
