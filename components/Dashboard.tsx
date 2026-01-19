@@ -405,6 +405,90 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
         </div>
       </div>
 
+      {/* Trend Analysis Chart */}
+      <div id="trend-analysis-section" className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+              <Activity className="text-blue-500" size={20} />
+              Trend Analysis
+            </h3>
+            <p className="text-xs text-slate-400 font-medium">
+              {selectedTrendIds.length > 0 
+                ? `Comparing ${selectedTrendIds.length} Asset(s)` 
+                : "Select assets from the table or alarms to view trends"}
+            </p>
+          </div>
+          
+          <div className="flex flex-wrap gap-2 bg-slate-50 p-1 rounded-xl">
+             <button 
+               onClick={() => setChartOptions({...chartOptions, showTotal: !chartOptions.showTotal})}
+               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showTotal ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+             >
+               Total
+             </button>
+             <button 
+               onClick={() => setChartOptions({...chartOptions, showResistive: !chartOptions.showResistive})}
+               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showResistive ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+             >
+               Resistive
+             </button>
+             <button 
+               onClick={() => setChartOptions({...chartOptions, showCorrected: !chartOptions.showCorrected})}
+               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showCorrected ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+             >
+               Corrected
+             </button>
+          </div>
+        </div>
+
+        <div className="h-[350px] w-full">
+          {selectedTrendIds.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <ReLineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} dy={10} />
+                <YAxis tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} width={30} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
+                  labelStyle={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px' }}
+                />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                
+                {selectedTrendIds.map((id, index) => {
+                  const eq = equipments.find(e => e.id === id);
+                  if (!eq) return null;
+                  // Generate deterministic colors based on index
+                  const colors = ['#2563eb', '#db2777', '#ca8a04', '#16a34a', '#9333ea', '#ea580c'];
+                  const baseColor = colors[index % colors.length];
+                  
+                  return (
+                    <React.Fragment key={id}>
+                      {chartOptions.showTotal && (
+                        <Line type="monotone" dataKey={`${eq.name}_total`} name={`${eq.name} (Total)`} stroke="#94a3b8" strokeDasharray="3 3" dot={false} strokeWidth={1} />
+                      )}
+                      {chartOptions.showResistive && (
+                        <Line type="monotone" dataKey={`${eq.name}_resistive`} name={`${eq.name} (Res)`} stroke={baseColor} strokeOpacity={0.4} dot={false} strokeWidth={1} />
+                      )}
+                      {chartOptions.showCorrected && (
+                        <Line type="monotone" dataKey={`${eq.name}_corrected`} name={`${eq.name} (Corr)`} stroke={baseColor} strokeWidth={3} dot={{ r: 3, fill: baseColor, strokeWidth: 0 }} activeDot={{ r: 6 }} />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </ReLineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center text-slate-300">
+               <Activity size={48} className="mb-2 opacity-50" />
+               <p className="text-sm font-bold">No assets selected for analysis</p>
+               <p className="text-xs">Click asset names in the table below to add them to this chart</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Operational Health Overview Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
