@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { UserPlus, Trash2, Shield, User, X, Wrench, Hammer, Key } from 'lucide-react';
 import { UserAccount, Role, Equipment, Reading, ThresholdSettings } from '../types';
@@ -172,7 +171,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
       await supabase.from('readings').delete().neq('id', '0');
       await supabase.from('equipment').delete().neq('id', '0');
       await supabase.from('user_accounts').delete().neq('id', '0');
-      await supabase.from('settings').upsert({ id: 1, poorLimit: 300, criticalLimit: 500 });
+      await supabase.from('settings').upsert({ id: 1, poorLimit: 50, criticalLimit: 100 });
       const { error } = await supabase.from('user_accounts').upsert(defaultAdmin);
 
       if (error) {

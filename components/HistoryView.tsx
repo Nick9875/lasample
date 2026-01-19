@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo } from 'react';
 import { Search, Edit3, Trash2, X, Check, Filter, AlertCircle, History, ChevronDown, ChevronUp, Zap, Activity, CheckCircle2, RotateCcw, ShieldAlert } from 'lucide-react';
-import { Reading, Equipment, HealthStatus } from '../types';
+import { Reading, Equipment, HealthStatus, ThresholdSettings } from '../types';
 import { formatDisplayDate } from '../utils/reports';
 import { supabase } from '../services/supabaseClient';
 
@@ -11,9 +10,10 @@ interface HistoryViewProps {
   equipments: Equipment[];
   setEquipments: React.Dispatch<React.SetStateAction<Equipment[]>>;
   isAdmin: boolean;
+  settings: ThresholdSettings;
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipments, setEquipments, isAdmin }) => {
+const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipments, setEquipments, isAdmin, settings }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [ratedKVFilter, setRatedKVFilter] = useState<number | 'All'>('All');
@@ -28,8 +28,8 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
 
   const getStatusForReading = (reading: Reading): 'Satisfactory' | 'Poor' | 'Critical' => {
     const val = Number(reading.correctedResistiveCurrent);
-    if (val > 500) return 'Critical';
-    if (val > 300) return 'Poor';
+    if (val > settings.criticalLimit) return 'Critical';
+    if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';
   };
 
@@ -38,8 +38,8 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
     if (!latest) return 'Satisfactory'; 
     const val = Number(latest.correctedResistiveCurrent);
     if (val === 0) return 'Probe Failure'; 
-    if (val > 500) return 'Critical';
-    if (val > 300) return 'Poor';
+    if (val > settings.criticalLimit) return 'Critical';
+    if (val > settings.poorLimit) return 'Poor';
     return 'Satisfactory';
   };
 
@@ -90,7 +90,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
       }
       return a.name.localeCompare(b.name);
     });
-  }, [equipments, readings, searchTerm, statusFilter, ratedKVFilter]);
+  }, [equipments, readings, searchTerm, statusFilter, ratedKVFilter, settings]);
 
 
   const handleDelete = async (id: string) => {

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
@@ -36,8 +35,8 @@ import { supabase } from './services/supabaseClient';
 import { Html5Qrcode } from 'html5-qrcode';
 
 const INITIAL_THRESHOLD: ThresholdSettings = {
-  poorLimit: 300,
-  criticalLimit: 500
+  poorLimit: 50,
+  criticalLimit: 100
 };
 
 const DEFAULT_ADMIN: UserAccount = {
@@ -573,6 +572,7 @@ const App: React.FC = () => {
                 isAdmin={hasWriteAccess} 
                 initialEditId={targetEquipmentId}
                 currentUser={currentUser}
+                settings={settings}
               />
             )}
             {currentView === 'readings' && (
@@ -592,6 +592,7 @@ const App: React.FC = () => {
                 equipments={equipments}
                 setEquipments={setEquipments} 
                 isAdmin={hasWriteAccess}
+                settings={settings}
               />
             )}
             {currentView === 'ai-diagnostic' && (
