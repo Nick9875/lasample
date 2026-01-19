@@ -20,6 +20,7 @@ export interface Equipment {
   model: string;
   mcovRating: number;
   statusOverride?: HealthStatus | null;
+  pendingSync?: boolean;
 }
 
 export interface Reading {
@@ -34,6 +35,7 @@ export interface Reading {
   notes?: string;
   recordedBy?: string;
   counterCount?: number;
+  pendingSync?: boolean;
 }
 
 export interface ThresholdSettings {

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
@@ -61,7 +60,7 @@ const App: React.FC = () => {
     }
   });
 
-  // Initialize Equipments from localStorage to prevent data loss on refresh
+  // Initialize Equipments from localStorage
   const [equipments, setEquipments] = useState<Equipment[]>(() => {
     try {
       const stored = localStorage.getItem('arrester_equipments');
@@ -100,13 +99,21 @@ const App: React.FC = () => {
   const [targetEquipmentId, setTargetEquipmentId] = useState<string | null>(null);
   const [dashboardFilter, setDashboardFilter] = useState<'All' | 'At Risk'>('All');
 
-  // Persistence Effects
+  // Persistence Effects - Safer write with try/catch
   useEffect(() => {
-    localStorage.setItem('arrester_equipments', JSON.stringify(equipments));
+    try {
+      localStorage.setItem('arrester_equipments', JSON.stringify(equipments));
+    } catch (e) {
+      console.error("LocalStorage write failed (Quota Exceeded?)", e);
+    }
   }, [equipments]);
 
   useEffect(() => {
-    localStorage.setItem('arrester_readings', JSON.stringify(readings));
+    try {
+      localStorage.setItem('arrester_readings', JSON.stringify(readings));
+    } catch (e) {
+      console.error("LocalStorage write failed (Quota Exceeded?)", e);
+    }
   }, [readings]);
 
   // Load Data from Supabase & Setup Realtime Subscriptions
@@ -132,24 +139,75 @@ const App: React.FC = () => {
            setUsers([DEFAULT_ADMIN]);
         }
 
-        // 3. Fetch Equipment & Merge with Local
+        // 3. Fetch Equipment & Robust Merge
         const { data: eqData } = await supabase.from('equipment').select('*');
         if (eqData) {
-           // Merge Strategy: Prefer DB data, but keep local items that aren't in DB yet
            setEquipments(prev => {
-             const dbIds = new Set(eqData.map(e => e.id));
-             const localOnly = prev.filter(e => !dbIds.has(e.id));
-             return [...eqData, ...localOnly];
+             const dbMap = new Map(eqData.map(e => [e.id, e]));
+             const merged: Equipment[] = [];
+             const processedIds = new Set<string>();
+
+             // Process Local items first
+             for (const localItem of prev) {
+               processedIds.add(localItem.id);
+               const dbItem = dbMap.get(localItem.id);
+               
+               if (dbItem) {
+                 // Conflict: Prefer Local if it has pendingSync flag (was edited offline)
+                 // Otherwise, prefer DB as source of truth
+                 if (localItem.pendingSync) {
+                   merged.push(localItem);
+                 } else {
+                   merged.push(dbItem as Equipment);
+                 }
+               } else {
+                 // Only in Local (New item created offline)
+                 merged.push(localItem);
+               }
+             }
+
+             // Process DB items not in Local (New from other users)
+             for (const [id, dbItem] of dbMap) {
+               if (!processedIds.has(id)) {
+                 merged.push(dbItem as Equipment);
+               }
+             }
+
+             return merged;
            });
         }
 
-        // 4. Fetch Readings & Merge with Local
+        // 4. Fetch Readings & Robust Merge
         const { data: readingData } = await supabase.from('readings').select('*');
         if (readingData) {
            setReadings(prev => {
-             const dbIds = new Set(readingData.map(r => r.id));
-             const localOnly = prev.filter(r => !dbIds.has(r.id));
-             return [...readingData, ...localOnly];
+             const dbMap = new Map(readingData.map(r => [r.id, r]));
+             const merged: Reading[] = [];
+             const processedIds = new Set<string>();
+
+             for (const localItem of prev) {
+               processedIds.add(localItem.id);
+               const dbItem = dbMap.get(localItem.id);
+               
+               if (dbItem) {
+                 if (localItem.pendingSync) {
+                   merged.push(localItem);
+                 } else {
+                   merged.push(dbItem as Reading);
+                 }
+               } else {
+                 merged.push(localItem);
+               }
+             }
+
+             for (const [id, dbItem] of dbMap) {
+               if (!processedIds.has(id)) {
+                 merged.push(dbItem as Reading);
+               }
+             }
+             
+             // Sort by date descending
+             return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
            });
         }
 
@@ -177,7 +235,15 @@ const App: React.FC = () => {
               return [...prev, payload.new as Equipment];
             });
           } else if (payload.eventType === 'UPDATE') {
-            setEquipments((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Equipment : item)));
+            setEquipments((prev) => prev.map((item) => {
+               // If we have a pending local change, ignore the incoming update to prevent overwriting typing
+               // But usually realtime updates are good. 
+               // For safety, only overwrite if not pendingSync
+               if (item.id === payload.new.id) {
+                   return item.pendingSync ? item : (payload.new as Equipment);
+               }
+               return item;
+            }));
           } else if (payload.eventType === 'DELETE') {
             setEquipments((prev) => prev.filter((item) => item.id !== payload.old.id));
           }
@@ -190,10 +256,15 @@ const App: React.FC = () => {
           if (payload.eventType === 'INSERT') {
             setReadings((prev) => {
               if (prev.some(r => r.id === payload.new.id)) return prev;
-              return [payload.new as Reading, ...prev]; // Add new reading to top
+              return [payload.new as Reading, ...prev]; 
             });
           } else if (payload.eventType === 'UPDATE') {
-            setReadings((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Reading : item)));
+             setReadings((prev) => prev.map((item) => {
+               if (item.id === payload.new.id) {
+                   return item.pendingSync ? item : (payload.new as Reading);
+               }
+               return item;
+            }));
           } else if (payload.eventType === 'DELETE') {
             setReadings((prev) => prev.filter((item) => item.id !== payload.old.id));
           }
@@ -251,7 +322,7 @@ const App: React.FC = () => {
             qrbox: { width: 250, height: 250 },
             aspectRatio: 1.0
           },
-          (decodedText) => {
+          (decodedText: string) => {
             // Success
             const eq = equipments.find(e => e.id === decodedText);
             if (eq) {
@@ -264,7 +335,7 @@ const App: React.FC = () => {
               console.warn("Unknown code:", decodedText);
             }
           },
-          (errorMessage) => {
+          (errorMessage: any) => {
             // Ignore frame parse errors
           }
         ).catch((err) => {
