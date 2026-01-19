@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Plus, 
@@ -474,32 +473,32 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
 
       {isEditing && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
               <div>
-                <h3 className="text-xl font-extrabold text-slate-800">{currentEquipment.id ? 'Modify Record' : 'Create New Asset'}</h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">Equipment Metadata Entry</p>
+                <h3 className="text-lg font-extrabold text-slate-800">{currentEquipment.id ? 'Modify Record' : 'Create New Asset'}</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">Equipment Metadata Entry</p>
               </div>
-              <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
+              <button onClick={() => setIsEditing(false)} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors"><X size={18} /></button>
             </div>
-            <form onSubmit={handleSaveEquipment} className="p-8 space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="md:col-span-2">
+            <form onSubmit={handleSaveEquipment} className="p-5 space-y-4 overflow-y-auto">
+              <div className="grid grid-cols-1 gap-4">
+                <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Equipment Unit Name</label>
-                  <input required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.name || ''} onChange={e => setCurrentEquipment({...currentEquipment, name: e.target.value})} />
+                  <input required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.name || ''} onChange={e => setCurrentEquipment({...currentEquipment, name: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Substation</label>
-                  <input required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.substation || ''} onChange={e => setCurrentEquipment({...currentEquipment, substation: e.target.value})} />
+                  <input required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.substation || ''} onChange={e => setCurrentEquipment({...currentEquipment, substation: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">District</label>
-                  <input required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.district || ''} onChange={e => setCurrentEquipment({...currentEquipment, district: e.target.value})} />
+                  <input required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.district || ''} onChange={e => setCurrentEquipment({...currentEquipment, district: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Voltage Class</label>
                   <select 
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" 
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" 
                     value={currentEquipment.voltageLevel || ''} 
                     onChange={e => setCurrentEquipment({...currentEquipment, voltageLevel: e.target.value})}
                   >
@@ -516,27 +515,27 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                     type="number" 
                     step="0.01" 
                     required 
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-mono text-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-base focus:ring-2 focus:ring-blue-500 outline-none" 
                     value={currentEquipment.ratedVoltage || ''} 
                     onChange={e => setCurrentEquipment({...currentEquipment, ratedVoltage: parseFloat(e.target.value)})} 
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Brand</label>
-                  <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.brand || ''} onChange={e => setCurrentEquipment({...currentEquipment, brand: e.target.value})} />
+                  <input className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.brand || ''} onChange={e => setCurrentEquipment({...currentEquipment, brand: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Model</label>
-                  <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.model || ''} onChange={e => setCurrentEquipment({...currentEquipment, model: e.target.value})} />
+                  <input className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.model || ''} onChange={e => setCurrentEquipment({...currentEquipment, model: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">MCOV Rating</label>
-                  <input type="number" step="0.01" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-mono text-lg focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.mcovRating || ''} onChange={e => setCurrentEquipment({...currentEquipment, mcovRating: parseFloat(e.target.value)})} />
+                  <input type="number" step="0.01" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-base focus:ring-2 focus:ring-blue-500 outline-none" value={currentEquipment.mcovRating || ''} onChange={e => setCurrentEquipment({...currentEquipment, mcovRating: parseFloat(e.target.value)})} />
                 </div>
               </div>
-              <div className="flex gap-4 pt-4">
-                <button type="submit" className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-extrabold shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all uppercase tracking-widest">Commit Asset</button>
-                <button type="button" onClick={() => setIsEditing(false)} className="px-10 bg-slate-100 text-slate-600 py-4 rounded-2xl font-bold uppercase tracking-widest">Cancel</button>
+              <div className="flex gap-3 pt-2 shrink-0 pb-2">
+                <button type="submit" className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-extrabold shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all uppercase tracking-widest text-xs">Commit Asset</button>
+                <button type="button" onClick={() => setIsEditing(false)} className="px-6 bg-slate-100 text-slate-600 py-3 rounded-xl font-bold uppercase tracking-widest text-xs">Cancel</button>
               </div>
             </form>
           </div>
