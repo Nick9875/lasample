@@ -20,7 +20,8 @@ import {
   X,
   ArrowRight,
   Edit,
-  BarChart3
+  BarChart3,
+  RefreshCw
 } from 'lucide-react';
 import { Equipment, Reading, UserAccount, ThresholdSettings, View, HealthStatus, GlobalHealthStats } from './types';
 import Dashboard from './components/Dashboard';
@@ -82,6 +83,7 @@ const App: React.FC = () => {
 
   const [settings, setSettings] = useState<ThresholdSettings>(INITIAL_THRESHOLD);
   const [loading, setLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -104,7 +106,7 @@ const App: React.FC = () => {
     try {
       localStorage.setItem('arrester_equipments', JSON.stringify(equipments));
     } catch (e) {
-      console.error("LocalStorage write failed (Quota Exceeded?)", e);
+      console.error("LocalStorage write failed (Quota Exceeded?)", e as any);
     }
   }, [equipments]);
 
@@ -112,9 +114,49 @@ const App: React.FC = () => {
     try {
       localStorage.setItem('arrester_readings', JSON.stringify(readings));
     } catch (e) {
-      console.error("LocalStorage write failed (Quota Exceeded?)", e);
+      console.error("LocalStorage write failed (Quota Exceeded?)", e as any);
     }
   }, [readings]);
+
+  // Sync Function for Pending Data
+  const syncPendingData = async (currentEquipments: Equipment[], currentReadings: Reading[]) => {
+    const pendingEq = currentEquipments.filter(e => e.pendingSync);
+    const pendingRd = currentReadings.filter(r => r.pendingSync);
+
+    if (pendingEq.length === 0 && pendingRd.length === 0) return;
+
+    setIsSyncing(true);
+    console.log(`Syncing ${pendingEq.length} equipment and ${pendingRd.length} readings...`);
+
+    try {
+      if (pendingEq.length > 0) {
+          const cleanEq = pendingEq.map(({ pendingSync, ...rest }) => rest);
+          const { error } = await supabase.from('equipment').upsert(cleanEq);
+          if (!error) {
+              setEquipments(prev => prev.map(e => e.pendingSync ? { ...e, pendingSync: false } : e));
+          } else {
+              console.error("Equipment Sync Error:", error as any);
+          }
+      }
+
+      if (pendingRd.length > 0) {
+          // Chunk reading uploads
+          const cleanRd = pendingRd.map(({ pendingSync, ...rest }) => rest);
+          const chunkSize = 50;
+          for (let i = 0; i < cleanRd.length; i += chunkSize) {
+             const chunk = cleanRd.slice(i, i + chunkSize);
+             const { error } = await supabase.from('readings').upsert(chunk);
+             if (error) throw error;
+          }
+          // On success, update local state
+          setReadings(prev => prev.map(r => r.pendingSync ? { ...r, pendingSync: false } : r));
+      }
+    } catch (err) {
+      console.error("Sync Failed:", err as any);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Load Data from Supabase & Setup Realtime Subscriptions
   useEffect(() => {
@@ -140,15 +182,16 @@ const App: React.FC = () => {
         }
 
         // 3. Fetch Equipment & Robust Merge
+        let finalEquipments = [...equipments];
         const { data: eqData } = await supabase.from('equipment').select('*');
         if (eqData) {
-           setEquipments(prev => {
+           finalEquipments = (() => {
              const dbMap = new Map(eqData.map(e => [e.id, e]));
              const merged: Equipment[] = [];
              const processedIds = new Set<string>();
 
              // Process Local items first
-             for (const localItem of prev) {
+             for (const localItem of equipments) {
                processedIds.add(localItem.id);
                const dbItem = dbMap.get(localItem.id);
                
@@ -172,20 +215,21 @@ const App: React.FC = () => {
                  merged.push(dbItem as Equipment);
                }
              }
-
              return merged;
-           });
+           })();
+           setEquipments(finalEquipments);
         }
 
         // 4. Fetch Readings & Robust Merge
+        let finalReadings = [...readings];
         const { data: readingData } = await supabase.from('readings').select('*');
         if (readingData) {
-           setReadings(prev => {
+           finalReadings = (() => {
              const dbMap = new Map(readingData.map(r => [r.id, r]));
              const merged: Reading[] = [];
              const processedIds = new Set<string>();
 
-             for (const localItem of prev) {
+             for (const localItem of readings) {
                processedIds.add(localItem.id);
                const dbItem = dbMap.get(localItem.id);
                
@@ -208,10 +252,14 @@ const App: React.FC = () => {
              
              // Sort by date descending
              return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-           });
+           })();
+           setReadings(finalReadings);
         }
 
         setIsConnected(true);
+        // Attempt to sync any pending data we found in local storage
+        syncPendingData(finalEquipments, finalReadings);
+
       } catch (error) {
         console.error("Failed to fetch initial data", error);
         setIsConnected(false);
@@ -236,9 +284,6 @@ const App: React.FC = () => {
             });
           } else if (payload.eventType === 'UPDATE') {
             setEquipments((prev) => prev.map((item) => {
-               // If we have a pending local change, ignore the incoming update to prevent overwriting typing
-               // But usually realtime updates are good. 
-               // For safety, only overwrite if not pendingSync
                if (item.id === payload.new.id) {
                    return item.pendingSync ? item : (payload.new as Equipment);
                }
@@ -495,11 +540,12 @@ const App: React.FC = () => {
                 Sign In
               </button>
             </div>
-            <div className="mt-4 flex justify-center">
+            <div className="mt-4 flex justify-center flex-col items-center gap-1">
                  {isConnected ? 
                     <span className="text-[10px] text-emerald-500 flex items-center gap-1"><Cloud size={12}/> Cloud Database Connected</span> : 
                     <span className="text-[10px] text-amber-500 flex items-center gap-1"><CloudOff size={12}/> Offline Mode / Connection Failed</span>
                  }
+                 {isSyncing && <span className="text-[10px] text-blue-400 flex items-center gap-1"><RefreshCw size={10} className="animate-spin"/> Syncing pending data...</span>}
             </div>
           </form>
         </div>
@@ -580,6 +626,12 @@ const App: React.FC = () => {
         </nav>
 
         <div className="p-4 border-t border-slate-800 space-y-2">
+          {isSyncing && (
+             <div className="px-3 py-2 bg-blue-900/50 rounded-lg flex items-center gap-2 text-[10px] text-blue-200 font-bold mb-2 animate-pulse">
+                <RefreshCw size={12} className="animate-spin" />
+                Syncing unsaved records...
+             </div>
+          )}
           <div className="flex items-center justify-between bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
             <div className="flex flex-col">
               <span className="text-white text-sm font-bold truncate max-w-[120px]">{currentUser.username}</span>

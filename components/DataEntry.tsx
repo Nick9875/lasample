@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2, QrCode, ShieldAlert } from 'lucide-react';
 import { Equipment, Reading, UserAccount } from '../types';
@@ -43,9 +44,23 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     localStorage.setItem('arrester_manual_entry_form', JSON.stringify(formData));
   }, [formData]);
 
-  const [bulkDate, setBulkDate] = useState(new Date().toISOString().split('T')[0]);
-  const [bulkSubstation, setBulkSubstation] = useState('');
-  const [bulkInputs, setBulkInputs] = useState<Record<string, { total: string, resistive: string, corrected: string, counter: string }>>({});
+  const [bulkDate, setBulkDate] = useState(() => {
+      return localStorage.getItem('arrester_bulk_date') || new Date().toISOString().split('T')[0];
+  });
+  const [bulkSubstation, setBulkSubstation] = useState(() => {
+      return localStorage.getItem('arrester_bulk_substation') || '';
+  });
+  const [bulkInputs, setBulkInputs] = useState<Record<string, { total: string, resistive: string, corrected: string, counter: string }>>(() => {
+      try {
+          const saved = localStorage.getItem('arrester_bulk_inputs');
+          return saved ? JSON.parse(saved) : {};
+      } catch(e) { return {}; }
+  });
+
+  // Persist Bulk Data
+  useEffect(() => { localStorage.setItem('arrester_bulk_date', bulkDate); }, [bulkDate]);
+  useEffect(() => { localStorage.setItem('arrester_bulk_substation', bulkSubstation); }, [bulkSubstation]);
+  useEffect(() => { localStorage.setItem('arrester_bulk_inputs', JSON.stringify(bulkInputs)); }, [bulkInputs]);
   
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pastedColumns, setPastedColumns] = useState({
@@ -154,6 +169,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     };
 
     let syncSuccess = false;
+    let errorMsg = "";
     try {
         // We exclude 'pendingSync' from the DB insert payload
         const { pendingSync, ...dbPayload } = reading;
@@ -162,6 +178,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
         syncSuccess = true;
     } catch (error: any) {
         console.warn("Cloud sync failed:", error);
+        errorMsg = error.message || "Unknown error";
     }
 
     // If synced successfully, remove pending flag
@@ -170,7 +187,12 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     }
 
     addReading(reading);
-    alert(syncSuccess ? "Individual reading recorded to database." : "Network Error: Reading saved locally only (Pending Sync).");
+    
+    if (syncSuccess) {
+        alert("Individual reading recorded to database.");
+    } else {
+        alert(`Network Issue: Reading saved locally (Pending Sync). will retry automatically.\n\nError: ${errorMsg}`);
+    }
     
     // Reset form and clear auto-save
     const defaultForm = { ...formData, totalCurrent: '', resistiveCurrent: '', correctedResistiveCurrent: '', counterCount: '' };
@@ -212,6 +234,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     });
 
     let syncSuccess = false;
+    let errorMsg = "";
     try {
         // Chunk uploads
         const chunkSize = 50;
@@ -223,6 +246,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
         syncSuccess = true;
     } catch (error: any) {
         console.warn("Cloud sync failed:", error);
+        errorMsg = error.message || "Unknown error";
     }
     
     // Update local state, stripping pendingSync if successful
@@ -231,10 +255,14 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     
     if (syncSuccess) {
         alert(`Batch Complete: Successfully recorded ${batchReadings.length} units to database.`);
+        setBulkInputs({}); // Only clear if successful
+        localStorage.removeItem('arrester_bulk_inputs');
     } else {
-        alert(`Offline Mode: ${batchReadings.length} units saved locally. Check connection.`);
+        alert(`Offline Mode: ${batchReadings.length} units saved locally. System will retry sync automatically.\n\nError: ${errorMsg}`);
+        // Optionally keep inputs or clear them - standard is clear and rely on 'readings' state for history
+        setBulkInputs({});
+        localStorage.removeItem('arrester_bulk_inputs');
     }
-    setBulkInputs({});
   };
 
   const applyColumnPaste = () => {
