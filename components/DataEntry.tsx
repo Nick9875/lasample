@@ -116,13 +116,19 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     return equipments.find(item => item.id === formData.equipmentId);
   }, [equipments, formData.equipmentId]);
 
+  const generateId = () => {
+    return window.crypto && window.crypto.randomUUID 
+      ? window.crypto.randomUUID() 
+      : `gen-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+  };
+
   const handleIndividualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const eq = equipments.find(item => item.id === formData.equipmentId);
     if (!eq) return alert("Select an equipment unit.");
 
     const reading: Reading = {
-      id: `rd-${Date.now()}`,
+      id: generateId(),
       equipmentId: formData.equipmentId,
       date: formData.date,
       totalCurrent: parseFloat(formData.totalCurrent) || 0,
@@ -167,7 +173,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       const eq = equipments.find(e => e.id === eqId);
       if (eq) {
         batchReadings.push({
-          id: `rd-${Date.now()}-${eqId}-${Math.random().toString(36).substr(2, 4)}`,
+          id: generateId(),
           equipmentId: eqId,
           date: bulkDate,
           totalCurrent: parseFloat(vals.total) || 0,
@@ -299,6 +305,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
         const data = XLSX.utils.sheet_to_json(ws) as any[];
 
         const newReadings: Reading[] = [];
+        // We use a copy of the current equipments to check against for duplicates/updates
         let updatedEquipments = [...equipments];
         // Track unique equipments that need to be upserted (new or modified)
         const equipmentsToUpsert = new Map<string, Equipment>(); 
@@ -314,6 +321,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
           
           if (!name || !substation || !dateStr) return;
 
+          // Check if equipment already exists in our local list (which is synced with DB on load)
           let eqIndex = updatedEquipments.findIndex(e => 
             e.name.toLowerCase() === name.toLowerCase() && 
             e.substation.toLowerCase() === substation.toLowerCase()
@@ -322,8 +330,9 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
           let eq: Equipment;
 
           if (eqIndex === -1) {
+            // New equipment
             eq = {
-              id: `eq-imp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              id: generateId(),
               name: name,
               substation: substation,
               district: (row['District'] || 'General')?.toString().trim(),
@@ -338,6 +347,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
             equipmentsToUpsert.set(eq.id, eq); // Mark for upsert
             newAssetsCount++;
           } else {
+            // Existing equipment - Check for updates
             eq = { ...updatedEquipments[eqIndex] };
             let modified = false;
             
@@ -369,7 +379,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
           }
 
           newReadings.push({
-            id: `rd-imp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: generateId(),
             equipmentId: eq.id,
             date: parseInputDate(row['Date']),
             totalCurrent: parseFloat(row['Total (uA)'] || row['Total'] || 0),
@@ -386,7 +396,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
         if (successCount > 0) {
            let syncMsg = "Synchronized with database.";
            try {
-               // 1. Bulk Upsert Equipment (only changed ones)
+               // 1. Bulk Upsert Equipment (only changed/new ones)
                if (equipmentsToUpsert.size > 0) {
                    const { error: eqError } = await supabase.from('equipment').upsert(Array.from(equipmentsToUpsert.values()));
                    if (eqError) throw eqError;

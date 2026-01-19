@@ -61,8 +61,26 @@ const App: React.FC = () => {
     }
   });
 
-  const [equipments, setEquipments] = useState<Equipment[]>([]);
-  const [readings, setReadings] = useState<Reading[]>([]);
+  // Initialize Equipments from localStorage to prevent data loss on refresh
+  const [equipments, setEquipments] = useState<Equipment[]>(() => {
+    try {
+      const stored = localStorage.getItem('arrester_equipments');
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Initialize Readings from localStorage
+  const [readings, setReadings] = useState<Reading[]>(() => {
+    try {
+      const stored = localStorage.getItem('arrester_readings');
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
   const [settings, setSettings] = useState<ThresholdSettings>(INITIAL_THRESHOLD);
   const [loading, setLoading] = useState(true);
 
@@ -81,6 +99,15 @@ const App: React.FC = () => {
   // Navigation props
   const [targetEquipmentId, setTargetEquipmentId] = useState<string | null>(null);
   const [dashboardFilter, setDashboardFilter] = useState<'All' | 'At Risk'>('All');
+
+  // Persistence Effects
+  useEffect(() => {
+    localStorage.setItem('arrester_equipments', JSON.stringify(equipments));
+  }, [equipments]);
+
+  useEffect(() => {
+    localStorage.setItem('arrester_readings', JSON.stringify(readings));
+  }, [readings]);
 
   // Load Data from Supabase & Setup Realtime Subscriptions
   useEffect(() => {
@@ -105,13 +132,26 @@ const App: React.FC = () => {
            setUsers([DEFAULT_ADMIN]);
         }
 
-        // 3. Fetch Equipment
+        // 3. Fetch Equipment & Merge with Local
         const { data: eqData } = await supabase.from('equipment').select('*');
-        if (eqData) setEquipments(eqData);
+        if (eqData) {
+           // Merge Strategy: Prefer DB data, but keep local items that aren't in DB yet
+           setEquipments(prev => {
+             const dbIds = new Set(eqData.map(e => e.id));
+             const localOnly = prev.filter(e => !dbIds.has(e.id));
+             return [...eqData, ...localOnly];
+           });
+        }
 
-        // 4. Fetch Readings
+        // 4. Fetch Readings & Merge with Local
         const { data: readingData } = await supabase.from('readings').select('*');
-        if (readingData) setReadings(readingData);
+        if (readingData) {
+           setReadings(prev => {
+             const dbIds = new Set(readingData.map(r => r.id));
+             const localOnly = prev.filter(r => !dbIds.has(r.id));
+             return [...readingData, ...localOnly];
+           });
+        }
 
         setIsConnected(true);
       } catch (error) {
@@ -326,7 +366,7 @@ const App: React.FC = () => {
   }, [globalHealthStats]);
 
 
-  if (loading) {
+  if (loading && equipments.length === 0) { // Only show loader if we have NO data at all
       return (
           <div className="min-h-screen bg-slate-900 flex items-center justify-center">
               <div className="text-center text-white">
