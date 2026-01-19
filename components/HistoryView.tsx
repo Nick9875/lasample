@@ -359,6 +359,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
                             <th className="px-2 py-3 text-center">Total (uA)</th>
                             <th className="px-2 py-3 text-center">Resistive (uA)</th>
                             <th className="px-2 py-3 text-center font-bold text-blue-600">Corrected (uA)</th>
+                            <th className="px-2 py-3 text-center">Counter</th>
                             <th className="px-3 py-3 text-center">Status</th> 
                             <th className="px-3 py-3 text-left">Notes / User</th>
                             <th className="px-3 py-3 text-right">Actions</th>
@@ -399,6 +400,11 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
                                   {isEditing ? (
                                     <input type="number" className="w-16 text-center bg-white border rounded font-bold text-blue-600" value={tempData.correctedResistiveCurrent || ''} onChange={e => setTempData({...tempData, correctedResistiveCurrent: parseFloat(e.target.value)})} />
                                   ) : r.correctedResistiveCurrent}
+                                </td>
+                                <td className="px-2 py-3 text-center font-mono">
+                                  {isEditing ? (
+                                    <input type="number" className="w-12 text-center bg-white border rounded" value={tempData.counterCount || ''} onChange={e => setTempData({...tempData, counterCount: parseInt(e.target.value) || 0})} />
+                                  ) : (r.counterCount || 0)}
                                 </td>
                                 <td className="px-3 py-3 text-center"> 
                                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusColors[readingStatus]}`}>
@@ -441,7 +447,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
                           })}
                           {measurementReadings.length === 0 && (
                             <tr>
-                              <td colSpan={9} className="py-10 text-center text-slate-400 italic">No measurement history found for this asset.</td>
+                              <td colSpan={10} className="py-10 text-center text-slate-400 italic">No measurement history found for this asset.</td>
                             </tr>
                           )}
                         </tbody>

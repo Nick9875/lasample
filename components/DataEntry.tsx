@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2, QrCode, ShieldAlert } from 'lucide-react';
 import { Equipment, Reading, UserAccount } from '../types';
@@ -29,18 +28,20 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     totalCurrent: '',
     resistiveCurrent: '',
     correctedResistiveCurrent: '',
+    counterCount: '',
   });
 
   const [bulkDate, setBulkDate] = useState(new Date().toISOString().split('T')[0]);
   const [bulkSubstation, setBulkSubstation] = useState('');
-  const [bulkInputs, setBulkInputs] = useState<Record<string, { total: string, resistive: string, corrected: string }>>({});
+  const [bulkInputs, setBulkInputs] = useState<Record<string, { total: string, resistive: string, corrected: string, counter: string }>>({});
   
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pastedColumns, setPastedColumns] = useState({
     names: '',
     totals: '',
     resistive: '',
-    corrected: ''
+    corrected: '',
+    counter: ''
   });
 
   const [showScanner, setShowScanner] = useState(false);
@@ -126,6 +127,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       totalCurrent: parseFloat(formData.totalCurrent) || 0,
       resistiveCurrent: parseFloat(formData.resistiveCurrent) || 0,
       correctedResistiveCurrent: parseFloat(formData.correctedResistiveCurrent) || 0,
+      counterCount: parseInt(formData.counterCount) || 0,
       mcovRating: eq.mcovRating,
       ratedVoltage: eq.ratedVoltage || 0,
       recordedBy: currentUser.username,
@@ -142,22 +144,25 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
 
     addReading(reading);
     alert(syncSuccess ? "Individual reading recorded to database." : "Network Error: Reading saved locally only.");
-    setFormData({ ...formData, totalCurrent: '', resistiveCurrent: '', correctedResistiveCurrent: '' });
+    setFormData({ ...formData, totalCurrent: '', resistiveCurrent: '', correctedResistiveCurrent: '', counterCount: '' });
   };
 
-  const handleBulkInputChange = (eqId: string, field: 'total' | 'resistive' | 'corrected', value: string) => {
+  const handleBulkInputChange = (eqId: string, field: 'total' | 'resistive' | 'corrected' | 'counter', value: string) => {
     setBulkInputs(prev => ({
       ...prev,
-      [eqId]: { ...(prev[eqId] || { total: '', resistive: '', corrected: '' }), [field]: value }
+      [eqId]: { ...(prev[eqId] || { total: '', resistive: '', corrected: '', counter: '' }), [field]: value }
     }));
   };
 
   const handleBulkSubmit = async () => {
-    const entries = Object.entries(bulkInputs).filter(([_key, vals]: [string, { total: string, resistive: string, corrected: string }]) => vals.total || vals.resistive || vals.corrected);
+    // Explicitly type the entries to avoid 'unknown' errors
+    const entries = (Object.entries(bulkInputs) as [string, typeof bulkInputs[string]][])
+      .filter(([_key, vals]) => vals.total || vals.resistive || vals.corrected || vals.counter);
+
     if (entries.length === 0) return alert("No measurement data entered.");
 
     const batchReadings: Reading[] = [];
-    entries.forEach(([eqId, vals]: [string, { total: string, resistive: string, corrected: string }]) => {
+    entries.forEach(([eqId, vals]) => {
       const eq = equipments.find(e => e.id === eqId);
       if (eq) {
         batchReadings.push({
@@ -167,6 +172,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
           totalCurrent: parseFloat(vals.total) || 0,
           resistiveCurrent: parseFloat(vals.resistive) || 0,
           correctedResistiveCurrent: parseFloat(vals.corrected) || 0,
+          counterCount: parseInt(vals.counter) || 0,
           mcovRating: eq.mcovRating,
           ratedVoltage: eq.ratedVoltage || 0,
           recordedBy: currentUser.username,
@@ -198,6 +204,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     const totalsArr = pastedColumns.totals.split(/\r?\n/).map(s => s.trim());
     const resArr = pastedColumns.resistive.split(/\r?\n/).map(s => s.trim());
     const corrArr = pastedColumns.corrected.split(/\r?\n/).map(s => s.trim());
+    const countArr = pastedColumns.counter.split(/\r?\n/).map(s => s.trim());
 
     const newBulkInputs = { ...bulkInputs };
     let matchCount = 0;
@@ -207,18 +214,19 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       const eq = bulkEquipments.find(e => e.name.toLowerCase() === name.toLowerCase());
       if (eq) {
         if (!newBulkInputs[eq.id]) {
-            newBulkInputs[eq.id] = { total: '', resistive: '', corrected: '' };
+            newBulkInputs[eq.id] = { total: '', resistive: '', corrected: '', counter: '' };
         }
         newBulkInputs[eq.id].total = totalsArr[i] || newBulkInputs[eq.id].total;
         newBulkInputs[eq.id].resistive = resArr[i] || newBulkInputs[eq.id].resistive;
         newBulkInputs[eq.id].corrected = corrArr[i] || newBulkInputs[eq.id].corrected;
+        newBulkInputs[eq.id].counter = countArr[i] || newBulkInputs[eq.id].counter;
         matchCount++;
       }
     });
 
     setBulkInputs(newBulkInputs);
     setShowPasteModal(false);
-    setPastedColumns({ names: '', totals: '', resistive: '', corrected: '' });
+    setPastedColumns({ names: '', totals: '', resistive: '', corrected: '', counter: '' });
     alert(`Successfully mapped ${matchCount} records from pasted data.`);
   };
 
@@ -248,11 +256,13 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
             const total = row['Total Current (uA)'] || row['Total (uA)'] || row['Total'] || 0;
             const res = row['Resistive Current (uA)'] || row['Resistive (uA)'] || row['Resistive'] || 0;
             const corr = row['Corrected Resistive (uA)'] || row['Corrected (uA)'] || row['Corrected'] || 0;
+            const counter = row['Counter Count'] || row['Counter'] || row['Count'] || 0;
 
             localBulkInputs[eq.id] = {
               total: total.toString(),
               resistive: res.toString(),
-              corrected: corr.toString()
+              corrected: corr.toString(),
+              counter: counter.toString()
             };
             importCount++;
           }
@@ -338,6 +348,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
             totalCurrent: parseFloat(row['Total (uA)'] || row['Total'] || 0),
             resistiveCurrent: parseFloat(row['Resistive (uA)'] || row['Resistive'] || 0),
             correctedResistiveCurrent: parseFloat(row['Corrected (uA)'] || row['Corrected'] || 0),
+            counterCount: parseInt(row['Counter Count'] || row['Counter'] || row['Count'] || 0),
             mcovRating: eq.mcovRating,
             ratedVoltage: eq.ratedVoltage,
             recordedBy: currentUser.username,
@@ -464,7 +475,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Measurement Date</label>
               <input type="date" required className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-blue-500 outline-none" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
             </div>
-            <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6 border-t border-slate-100 pt-8">
+            <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-6 border-t border-slate-100 pt-8">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Total Current (uA)</label>
                 <input type="number" required step="0.1" className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-mono text-lg focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" placeholder="0.0" value={formData.totalCurrent} onChange={e => setFormData({...formData, totalCurrent: e.target.value})} />
@@ -476,6 +487,10 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Corrected Resistive (uA)</label>
                 <input type="number" required step="0.1" className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-mono text-lg font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" placeholder="0.0" value={formData.correctedResistiveCurrent} onChange={e => setFormData({...formData, correctedResistiveCurrent: e.target.value})} />
+              </div>
+               <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Counter Count</label>
+                <input type="number" step="1" className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-mono text-lg focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" placeholder="0" value={formData.counterCount} onChange={e => setFormData({...formData, counterCount: e.target.value})} />
               </div>
             </div>
           </div>
@@ -534,6 +549,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
                     <th className="px-4 py-3 text-center">Total (uA)</th>
                     <th className="px-4 py-3 text-center">Resistive (uA)</th>
                     <th className="px-4 py-3 text-center font-bold text-blue-600">Corrected (uA)</th>
+                    <th className="px-4 py-3 text-center">Counter Count</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -564,6 +580,14 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
                           onChange={e => handleBulkInputChange(eq.id, 'corrected', e.target.value)}
                         />
                       </td>
+                      <td className="px-4 py-2">
+                        <input 
+                          type="number" step="1" 
+                          className="w-full text-center bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono outline-none focus:ring-1 focus:ring-blue-500"
+                          value={bulkInputs[eq.id]?.counter || ''}
+                          onChange={e => handleBulkInputChange(eq.id, 'counter', e.target.value)}
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -590,7 +614,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
 
       {showPasteModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl overflow-hidden animate-in zoom-in-95">
             <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <div>
                 <h3 className="text-xl font-extrabold text-slate-800">Paste Column Data</h3>
@@ -603,41 +627,50 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
               </button>
             </div>
             <div className="p-8 space-y-6">
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Equipment Unit Names</label>
+              <div className="grid grid-cols-5 gap-4">
+                <div className="col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Equipment Names</label>
                   <textarea
-                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Paste equipment names, one per line"
+                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Names"
                     value={pastedColumns.names}
                     onChange={e => setPastedColumns({...pastedColumns, names: e.target.value})}
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Total Current (uA)</label>
+                <div className="col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Total (uA)</label>
                   <textarea
-                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Paste total currents, one per line"
+                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Total Current"
                     value={pastedColumns.totals}
                     onChange={e => setPastedColumns({...pastedColumns, totals: e.target.value})}
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Resistive Current (uA)</label>
+                <div className="col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Resistive (uA)</label>
                   <textarea
-                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Paste resistive currents, one per line"
+                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Resistive Current"
                     value={pastedColumns.resistive}
                     onChange={e => setPastedColumns({...pastedColumns, resistive: e.target.value})}
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Corrected Resistive (uA)</label>
+                <div className="col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Corrected (uA)</label>
                   <textarea
-                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Paste corrected resistive currents, one per line"
+                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Corrected Current"
                     value={pastedColumns.corrected}
                     onChange={e => setPastedColumns({...pastedColumns, corrected: e.target.value})}
+                  />
+                </div>
+                <div className="col-span-1">
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Counter Count</label>
+                  <textarea
+                    className="w-full h-32 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Counter Value"
+                    value={pastedColumns.counter}
+                    onChange={e => setPastedColumns({...pastedColumns, counter: e.target.value})}
                   />
                 </div>
               </div>

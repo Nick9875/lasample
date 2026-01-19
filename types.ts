@@ -33,6 +33,7 @@ export interface Reading {
   ratedVoltage: number; // numerical L-L kV
   notes?: string;
   recordedBy?: string;
+  counterCount?: number;
 }
 
 export interface ThresholdSettings {

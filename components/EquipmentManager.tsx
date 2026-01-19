@@ -57,7 +57,8 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     date: new Date().toISOString().split('T')[0], 
     total: '', 
     resistive: '', 
-    corrected: '' 
+    corrected: '',
+    counter: ''
   });
 
   const [editingReadingId, setEditingReadingId] = useState<string | null>(null);
@@ -239,6 +240,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
       totalCurrent: parseFloat(newReadingData.total),
       resistiveCurrent: parseFloat(newReadingData.resistive),
       correctedResistiveCurrent: parseFloat(newReadingData.corrected),
+      counterCount: parseInt(newReadingData.counter) || 0,
       mcovRating: eq.mcovRating,
       ratedVoltage: eq.ratedVoltage,
       recordedBy: currentUser.username,
@@ -252,7 +254,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
 
     setReadings(prev => [reading, ...prev]);
     setIsAddingReading(null);
-    setNewReadingData({ date: new Date().toISOString().split('T')[0], total: '', resistive: '', corrected: '' });
+    setNewReadingData({ date: new Date().toISOString().split('T')[0], total: '', resistive: '', corrected: '', counter: '' });
   };
 
   const handleEditReading = (reading: Reading) => {
@@ -632,7 +634,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                   {/* Inline New Measurement Form */}
                   {isAddingReading === eq.id && (
                     <div className="bg-blue-600 rounded-2xl p-6 text-white shadow-xl shadow-blue-600/20 animate-in zoom-in-95">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 items-end">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
                         <div className="col-span-1">
                           <label className="block text-[10px] font-bold text-blue-100 uppercase mb-1">Date</label>
                           <input type="date" className="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none focus:bg-white/20" value={newReadingData.date} onChange={e => setNewReadingData({...newReadingData, date: e.target.value})} />
@@ -642,14 +644,18 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                           <input type="number" step="0.1" className="w-full bg-white text-blue-900 rounded-xl px-3 py-2 text-xs font-bold outline-none" placeholder="0.0" value={newReadingData.total} onChange={e => setNewReadingData({...newReadingData, total: e.target.value})} />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-blue-100 uppercase mb-1">Resistive (uA)</label>
+                          <label className="block text-xs font-bold text-blue-100 uppercase mb-1">Resistive (uA)</label>
                           <input type="number" step="0.1" className="w-full bg-white text-blue-900 rounded-xl px-3 py-2 text-xs font-bold outline-none" placeholder="0.0" value={newReadingData.resistive} onChange={e => setNewReadingData({...newReadingData, resistive: e.target.value})} />
                         </div>
                         <div>
                           <label className="block text-[10px] font-bold text-blue-100 uppercase mb-1">Corrected (uA)</label>
                           <input type="number" step="0.1" className="w-full bg-white text-emerald-600 rounded-xl px-3 py-2 text-xs font-bold outline-none" placeholder="0.0" value={newReadingData.corrected} onChange={e => setNewReadingData({...newReadingData, corrected: e.target.value})} />
                         </div>
-                        <div className="md:col-start-4">
+                         <div>
+                          <label className="block text-[10px] font-bold text-blue-100 uppercase mb-1">Counter</label>
+                          <input type="number" step="1" className="w-full bg-white text-blue-900 rounded-xl px-3 py-2 text-xs font-bold outline-none" placeholder="0" value={newReadingData.counter} onChange={e => setNewReadingData({...newReadingData, counter: e.target.value})} />
+                        </div>
+                        <div className="md:col-span-5">
                           <button onClick={() => handleAddReading(eq)} className="w-full bg-white text-blue-600 font-extrabold py-2 rounded-xl text-xs hover:bg-blue-50 transition-colors flex items-center justify-center gap-2">
                             <Save size={14} /> Commit Entry
                           </button>
@@ -668,6 +674,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                           <th className="px-2 py-3 text-center">Total (uA)</th>
                           <th className="px-2 py-3 text-center">Resistive (uA)</th>
                           <th className="px-2 py-3 text-center font-bold text-blue-600">Corrected (uA)</th>
+                          <th className="px-2 py-3 text-center">Counter</th>
                           <th className="px-3 py-3 text-left">Notes / User</th>
                           <th className="px-3 py-3 text-right">Actions</th>
                         </tr>
@@ -707,6 +714,11 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                                   <input type="number" className="w-16 text-center bg-white border rounded font-bold text-blue-600" value={tempReadingData.correctedResistiveCurrent || ''} onChange={e => setTempReadingData({...tempReadingData, correctedResistiveCurrent: parseFloat(e.target.value)})} />
                                 ) : r.correctedResistiveCurrent}
                               </td>
+                              <td className="px-2 py-3 text-center font-mono">
+                                {isEditingReading ? (
+                                  <input type="number" className="w-12 text-center bg-white border rounded" value={tempReadingData.counterCount || ''} onChange={e => setTempReadingData({...tempReadingData, counterCount: parseInt(e.target.value) || 0})} />
+                                ) : (r.counterCount || 0)}
+                              </td>
                               <td className="px-3 py-3 text-left">
                                 {r.recordedBy && (
                                   <span className="text-[9px] text-slate-400 font-bold bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
@@ -732,7 +744,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                         })}
                         {filteredEqReadings.length === 0 && (
                           <tr>
-                            <td colSpan={8} className="py-10 text-center text-slate-400 italic">No measurement history found for this child asset.</td>
+                            <td colSpan={9} className="py-10 text-center text-slate-400 italic">No measurement history found for this child asset.</td>
                           </tr>
                         )}
                       </tbody>
@@ -763,24 +775,24 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                       <div key={qr.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center text-center">
                          <img src={qr.dataUrl} alt="QR Code" className="w-32 h-32 object-contain" />
                          <div className="mt-2 text-[10px] font-bold text-slate-700 leading-tight">{qr.name}</div>
-                         <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-1">{qr.substation}</div>
+                         <div className="text-[9px] text-slate-500 font-bold mt-1">{qr.substation}</div>
                       </div>
                    ))}
                 </div>
              </div>
              
-             <div className="p-6 border-t border-slate-100 flex justify-end gap-3 shrink-0">
+             <div className="p-6 border-t border-slate-100 bg-white flex justify-end gap-3 shrink-0">
                 <button 
-                   onClick={() => setShowQRPreview(false)}
-                   className="px-6 py-3 rounded-xl text-slate-600 font-bold hover:bg-slate-100 transition-colors"
+                  onClick={() => setShowQRPreview(false)} 
+                  className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-slate-200 transition-colors"
                 >
-                   Cancel
+                  Close
                 </button>
                 <button 
-                   onClick={generateQRCodesPDF}
-                   className="px-6 py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                  onClick={generateQRCodesPDF} 
+                  className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-lg shadow-blue-500/20"
                 >
-                   <FileDown size={18} /> Download PDF for Print
+                  <FileDown size={16} /> Download PDF
                 </button>
              </div>
           </div>

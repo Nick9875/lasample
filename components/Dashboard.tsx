@@ -539,6 +539,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
                 <th className="px-6 py-4">Substation</th>
                 <th className="px-6 py-4">Rated kV</th>
                 <th className="px-6 py-4 text-center">Corrected uA</th>
+                <th className="px-6 py-4 text-center">Counter</th>
                 <th className="px-6 py-4 text-center">History</th>
               </tr>
             </thead>
@@ -573,6 +574,9 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
                   <td className="px-4 py-4 text-center font-mono font-bold text-blue-600">
                     {item.latest?.correctedResistiveCurrent || '--'}
                   </td>
+                  <td className="px-6 py-4 text-center font-mono text-slate-500">
+                    {item.latest?.counterCount || 0}
+                  </td>
                   <td className="px-6 py-4 text-center">
                     <button onClick={() => setShowHistoryFor(item.id)} className="p-2 text-slate-400 hover:text-blue-600 bg-slate-100 rounded-lg transition-colors"><History size={16} /></button>
                   </td>
@@ -580,7 +584,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
               ))}
               {tableItems.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400 italic">No assets match the current filter criteria.</td>
+                  <td colSpan={7} className="py-12 text-center text-slate-400 italic">No assets match the current filter criteria.</td>
                 </tr>
               )}
             </tbody>
@@ -611,6 +615,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
                     <th className="py-3 text-center">Total (uA)</th>
                     <th className="py-3 text-center">Resistive (uA)</th>
                     <th className="py-3 text-center font-bold text-blue-600">Corrected (uA)</th>
+                    <th className="py-3 text-center">Counter</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -623,6 +628,7 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
                         <td className="py-3 text-center font-mono">{r.totalCurrent}</td>
                         <td className="py-3 text-center font-mono">{r.resistiveCurrent}</td>
                         <td className="py-3 text-center font-mono font-bold text-blue-600">{r.correctedResistiveCurrent}</td>
+                        <td className="py-3 text-center font-mono">{r.counterCount || 0}</td>
                       </tr>
                     ))}
                 </tbody>
