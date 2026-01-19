@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Plus, 
@@ -68,6 +69,16 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     const uniqueVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: number, b: number) => a - b);
     return ['All', ...uniqueVoltages.map(String)]; 
   }, [equipments]);
+
+  // Robust UUID generator polyfill
+  const generateId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c =>
+      (+c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> +c / 4).toString(16)
+    );
+  };
 
   // Handle Deep Linking / Auto-Opening Edit Modal
   useEffect(() => {
@@ -152,38 +163,46 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     e.preventDefault();
     if (!isAdmin) return alert("Admin login required.");
     
+    // Ensure we use a valid UUID for new items
     const newEq = {
         ...currentEquipment,
-        id: currentEquipment.id || `eq-${Date.now()}`,
+        id: currentEquipment.id || generateId(),
         brand: currentEquipment.brand || '',
         model: currentEquipment.model || '',
         mcovRating: currentEquipment.mcovRating || 0,
         statusOverride: currentEquipment.statusOverride || null,
+        pendingSync: true
     } as Equipment;
 
+    let syncSuccess = false;
     // Supabase Upsert
-    const { error } = await supabase.from('equipment').upsert(newEq);
+    const { pendingSync, ...dbPayload } = newEq;
+    const { error } = await supabase.from('equipment').upsert(dbPayload);
 
     if (error) {
-        alert("Error saving equipment: " + error.message);
-        return;
+        console.error("Equipment Save Error:", JSON.stringify(error, null, 2));
+        alert("Error saving equipment (saved locally): " + error.message);
+    } else {
+        syncSuccess = true;
     }
 
+    const finalEq = { ...newEq, pendingSync: !syncSuccess };
+
     if (currentEquipment.id) {
-      setEquipments(prev => prev.map(e => e.id === currentEquipment.id ? newEq : e));
+      setEquipments(prev => prev.map(e => e.id === currentEquipment.id ? finalEq : e));
       // Auto-sync local state for related readings (DB trigger handles this usually, but good for UI consistency)
       setReadings(prevReadings => prevReadings.map(r => {
         if (r.equipmentId === currentEquipment.id) {
           return {
             ...r,
-            ratedVoltage: newEq.ratedVoltage, 
-            mcovRating: newEq.mcovRating,   
+            ratedVoltage: finalEq.ratedVoltage, 
+            mcovRating: finalEq.mcovRating,   
           };
         }
         return r;
       }));
     } else {
-      setEquipments(prev => [...prev, newEq]); 
+      setEquipments(prev => [...prev, finalEq]); 
     }
     setIsEditing(false);
     setCurrentEquipment({});
@@ -233,7 +252,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     }
 
     const reading: Reading = {
-      id: `rd-${Date.now()}`,
+      id: generateId(),
       equipmentId: eq.id,
       date: newReadingData.date,
       totalCurrent: parseFloat(newReadingData.total),
@@ -242,15 +261,21 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
       mcovRating: eq.mcovRating,
       ratedVoltage: eq.ratedVoltage,
       recordedBy: currentUser.username,
+      pendingSync: true
     };
 
-    const { error } = await supabase.from('readings').insert(reading);
+    let syncSuccess = false;
+    const { pendingSync, ...dbPayload } = reading;
+    const { error } = await supabase.from('readings').insert(dbPayload);
+    
     if (error) {
-        alert("Error adding reading: " + error.message);
-        return;
+        console.error("Add Reading Error:", JSON.stringify(error, null, 2));
+        alert("Error adding reading (saved locally): " + error.message);
+    } else {
+        syncSuccess = true;
     }
 
-    setReadings(prev => [reading, ...prev]);
+    setReadings(prev => [{...reading, pendingSync: !syncSuccess}, ...prev]);
     setIsAddingReading(null);
     setNewReadingData({ date: new Date().toISOString().split('T')[0], total: '', resistive: '', corrected: '' });
   };
@@ -262,7 +287,8 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
 
   const saveReadingEdit = async () => {
     const updatedReading = { ...tempReadingData, id: editingReadingId } as Reading;
-    const { error } = await supabase.from('readings').upsert(updatedReading);
+    const { pendingSync, ...dbPayload } = updatedReading;
+    const { error } = await supabase.from('readings').upsert(dbPayload);
     
     if (error) {
         alert("Error updating reading: " + error.message);

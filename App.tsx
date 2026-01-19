@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
@@ -11,8 +10,8 @@ import {
   LogOut, 
   Database,
   Users,
-  CheckCircle2,
-  AlertCircle,
+  CheckCircle2, 
+  AlertCircle, 
   Activity,
   Cloud,
   CloudOff,
@@ -21,7 +20,8 @@ import {
   X,
   ArrowRight,
   Edit,
-  BarChart3
+  BarChart3,
+  RefreshCw
 } from 'lucide-react';
 import { Equipment, Reading, UserAccount, ThresholdSettings, View, HealthStatus, GlobalHealthStats } from './types';
 import Dashboard from './components/Dashboard';
@@ -61,10 +61,30 @@ const App: React.FC = () => {
     }
   });
 
-  const [equipments, setEquipments] = useState<Equipment[]>([]);
-  const [readings, setReadings] = useState<Reading[]>([]);
+  // Initialize Equipments from localStorage
+  const [equipments, setEquipments] = useState<Equipment[]>(() => {
+    try {
+      const stored = localStorage.getItem('arrester_equipments');
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Initialize Readings from localStorage
+  const [readings, setReadings] = useState<Reading[]>(() => {
+    try {
+      const stored = localStorage.getItem('arrester_readings');
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
   const [settings, setSettings] = useState<ThresholdSettings>(INITIAL_THRESHOLD);
   const [loading, setLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -81,6 +101,92 @@ const App: React.FC = () => {
   // Navigation props
   const [targetEquipmentId, setTargetEquipmentId] = useState<string | null>(null);
   const [dashboardFilter, setDashboardFilter] = useState<'All' | 'At Risk'>('All');
+
+  // Persistence Effects - Safer write with try/catch
+  useEffect(() => {
+    try {
+      localStorage.setItem('arrester_equipments', JSON.stringify(equipments));
+    } catch (e) {
+      console.error("LocalStorage write failed (Quota Exceeded?)", e as any);
+    }
+  }, [equipments]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('arrester_readings', JSON.stringify(readings));
+    } catch (e) {
+      console.error("LocalStorage write failed (Quota Exceeded?)", e as any);
+    }
+  }, [readings]);
+
+  // Sync Function for Pending Data
+  const syncPendingData = async (currentEquipments: Equipment[], currentReadings: Reading[]) => {
+    const pendingEq = currentEquipments.filter(e => e.pendingSync);
+    const pendingRd = currentReadings.filter(r => r.pendingSync);
+
+    if (pendingEq.length === 0 && pendingRd.length === 0) {
+      setSyncError(null);
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncError(null);
+    console.log(`Syncing ${pendingEq.length} equipment and ${pendingRd.length} readings...`);
+
+    try {
+      if (pendingEq.length > 0) {
+          const cleanEq = pendingEq.map(({ pendingSync, ...rest }) => rest);
+          const { error } = await supabase.from('equipment').upsert(cleanEq);
+          if (!error) {
+              setEquipments(prev => prev.map(e => e.pendingSync ? { ...e, pendingSync: false } : e));
+          } else {
+              if (error.message?.includes("Failed to fetch")) {
+                 setSyncError("Network unreachable. Retrying later.");
+              } else {
+                 console.error("Equipment Sync Error:", error);
+                 setSyncError(`Equipment Sync: ${error.message}`);
+              }
+          }
+      }
+
+      if (pendingRd.length > 0) {
+          // Chunk reading uploads to avoid payload limits
+          const cleanRd = pendingRd.map(({ pendingSync, ...rest }) => rest);
+          const chunkSize = 50;
+          let hasError = false;
+          
+          for (let i = 0; i < cleanRd.length; i += chunkSize) {
+             const chunk = cleanRd.slice(i, i + chunkSize);
+             const { error } = await supabase.from('readings').upsert(chunk);
+             if (error) {
+               if (error.message?.includes("Failed to fetch")) {
+                  setSyncError("Network unreachable. Retrying later.");
+               } else {
+                  console.error("Readings Sync Error (Chunk):", error);
+                  setSyncError(`Readings Sync: ${error.message}`);
+               }
+               hasError = true;
+               // Don't break, try other chunks
+             }
+          }
+          
+          // Only clear pending status if NO errors occurred
+          if (!hasError) {
+             setReadings(prev => prev.map(r => r.pendingSync ? { ...r, pendingSync: false } : r));
+          }
+      }
+    } catch (err: unknown) {
+      console.error("Sync Failed (Exception):", err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setSyncError(errorMessage || "Unknown network error");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleManualSync = () => {
+    syncPendingData(equipments, readings);
+  };
 
   // Load Data from Supabase & Setup Realtime Subscriptions
   useEffect(() => {
@@ -105,18 +211,110 @@ const App: React.FC = () => {
            setUsers([DEFAULT_ADMIN]);
         }
 
-        // 3. Fetch Equipment
-        const { data: eqData } = await supabase.from('equipment').select('*');
-        if (eqData) setEquipments(eqData);
+        // 3. Fetch Equipment & Robust Merge
+        let finalEquipments = [...equipments];
+        const { data: eqData, error: eqError } = await supabase.from('equipment').select('*');
+        
+        if (eqError) {
+            if (eqError.message && (eqError.message.includes("Failed to fetch") || eqError.message.includes("Network request failed"))) {
+                console.warn("App initialized in Offline Mode (DB unreachable).");
+                setIsConnected(false);
+            } else {
+                console.error("Initial Equipment Fetch Error:", eqError);
+            }
+        } else {
+            setIsConnected(true);
+        }
 
-        // 4. Fetch Readings
-        const { data: readingData } = await supabase.from('readings').select('*');
-        if (readingData) setReadings(readingData);
+        if (eqData) {
+           finalEquipments = (() => {
+             const dbMap = new Map(eqData.map(e => [e.id, e]));
+             const merged: Equipment[] = [];
+             const processedIds = new Set<string>();
 
-        setIsConnected(true);
-      } catch (error) {
-        console.error("Failed to fetch initial data", error);
-        setIsConnected(false);
+             // Process Local items first
+             for (const localItem of equipments) {
+               processedIds.add(localItem.id);
+               const dbItem = dbMap.get(localItem.id);
+               
+               if (dbItem) {
+                 if (localItem.pendingSync) {
+                   merged.push(localItem);
+                 } else {
+                   merged.push(dbItem as Equipment);
+                 }
+               } else {
+                 merged.push(localItem);
+               }
+             }
+
+             for (const [id, dbItem] of dbMap) {
+               if (!processedIds.has(id)) {
+                 merged.push(dbItem as Equipment);
+               }
+             }
+             return merged;
+           })();
+           setEquipments(finalEquipments);
+        }
+
+        // 4. Fetch Readings & Robust Merge
+        let finalReadings = [...readings];
+        const { data: readingData, error: rdError } = await supabase.from('readings').select('*');
+        
+        if (rdError) {
+             if (rdError.message && (rdError.message.includes("Failed to fetch") || rdError.message.includes("Network request failed"))) {
+                // Already warned in equipment block or will set offline
+                setIsConnected(false);
+            } else {
+                console.error("Initial Readings Fetch Error:", rdError);
+            }
+        }
+
+        if (readingData) {
+           finalReadings = (() => {
+             const dbMap = new Map(readingData.map(r => [r.id, r]));
+             const merged: Reading[] = [];
+             const processedIds = new Set<string>();
+
+             for (const localItem of readings) {
+               processedIds.add(localItem.id);
+               const dbItem = dbMap.get(localItem.id);
+               
+               if (dbItem) {
+                 if (localItem.pendingSync) {
+                   merged.push(localItem);
+                 } else {
+                   merged.push(dbItem as Reading);
+                 }
+               } else {
+                 merged.push(localItem);
+               }
+             }
+
+             for (const [id, dbItem] of dbMap) {
+               if (!processedIds.has(id)) {
+                 merged.push(dbItem as Reading);
+               }
+             }
+             
+             return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+           })();
+           setReadings(finalReadings);
+        }
+
+        // Attempt to sync any pending data we found in local storage
+        syncPendingData(finalEquipments, finalReadings);
+
+      } catch (error: unknown) {
+        // If it's a network error during any part of the async process
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage && (errorMessage.includes("Failed to fetch") || errorMessage.includes("Network request failed"))) {
+             console.warn("App initialized in Offline Mode (Network Error caught).");
+             setIsConnected(false);
+        } else {
+             console.error("Failed to fetch initial data", error);
+        }
         setUsers([DEFAULT_ADMIN]);
       } finally {
         setLoading(false);
@@ -137,7 +335,12 @@ const App: React.FC = () => {
               return [...prev, payload.new as Equipment];
             });
           } else if (payload.eventType === 'UPDATE') {
-            setEquipments((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Equipment : item)));
+            setEquipments((prev) => prev.map((item) => {
+               if (item.id === payload.new.id) {
+                   return item.pendingSync ? item : (payload.new as Equipment);
+               }
+               return item;
+            }));
           } else if (payload.eventType === 'DELETE') {
             setEquipments((prev) => prev.filter((item) => item.id !== payload.old.id));
           }
@@ -150,38 +353,18 @@ const App: React.FC = () => {
           if (payload.eventType === 'INSERT') {
             setReadings((prev) => {
               if (prev.some(r => r.id === payload.new.id)) return prev;
-              return [payload.new as Reading, ...prev]; // Add new reading to top
+              return [payload.new as Reading, ...prev]; 
             });
           } else if (payload.eventType === 'UPDATE') {
-            setReadings((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Reading : item)));
+             setReadings((prev) => prev.map((item) => {
+               if (item.id === payload.new.id) {
+                   return item.pendingSync ? item : (payload.new as Reading);
+               }
+               return item;
+            }));
           } else if (payload.eventType === 'DELETE') {
             setReadings((prev) => prev.filter((item) => item.id !== payload.old.id));
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'settings' },
-        (payload) => {
-          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-             setSettings({
-               poorLimit: Number(payload.new.poorLimit),
-               criticalLimit: Number(payload.new.criticalLimit)
-             });
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'user_accounts' },
-        (payload) => {
-           if (payload.eventType === 'INSERT') {
-             setUsers(prev => [...prev, payload.new as UserAccount]);
-           } else if (payload.eventType === 'UPDATE') {
-             setUsers(prev => prev.map(u => u.id === payload.new.id ? payload.new as UserAccount : u));
-           } else if (payload.eventType === 'DELETE') {
-             setUsers(prev => prev.filter(u => u.id !== payload.old.id));
-           }
         }
       )
       .subscribe();
@@ -211,20 +394,20 @@ const App: React.FC = () => {
             qrbox: { width: 250, height: 250 },
             aspectRatio: 1.0
           },
-          (decodedText) => {
+          (decodedText: string) => {
             // Success
             const eq = equipments.find(e => e.id === decodedText);
             if (eq) {
               setScannedEquipmentId(eq.id);
               setShowGlobalScanner(false);
               setShowActionModal(true);
-              html5QrCode?.stop().catch(console.error);
+              html5QrCode?.stop().catch((err) => console.error(err));
             } else {
               // Could add a toast here for invalid code
               console.warn("Unknown code:", decodedText);
             }
           },
-          (errorMessage) => {
+          (errorMessage: any) => {
             // Ignore frame parse errors
           }
         ).catch((err) => {
@@ -236,7 +419,7 @@ const App: React.FC = () => {
       return () => {
         clearTimeout(timer);
         if (html5QrCode && html5QrCode.isScanning) {
-          html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error);
+          html5QrCode.stop().then(() => html5QrCode?.clear()).catch((err) => console.error(err));
         }
       };
     }
@@ -326,7 +509,7 @@ const App: React.FC = () => {
   }, [globalHealthStats]);
 
 
-  if (loading) {
+  if (loading && equipments.length === 0) { // Only show loader if we have NO data at all
       return (
           <div className="min-h-screen bg-slate-900 flex items-center justify-center">
               <div className="text-center text-white">
@@ -384,11 +567,12 @@ const App: React.FC = () => {
                 Sign In
               </button>
             </div>
-            <div className="mt-4 flex justify-center">
+            <div className="mt-4 flex justify-center flex-col items-center gap-1">
                  {isConnected ? 
                     <span className="text-[10px] text-emerald-500 flex items-center gap-1"><Cloud size={12}/> Cloud Database Connected</span> : 
                     <span className="text-[10px] text-amber-500 flex items-center gap-1"><CloudOff size={12}/> Offline Mode / Connection Failed</span>
                  }
+                 {isSyncing && <span className="text-[10px] text-blue-400 flex items-center gap-1"><RefreshCw size={10} className="animate-spin"/> Syncing pending data...</span>}
             </div>
           </form>
         </div>
@@ -469,6 +653,24 @@ const App: React.FC = () => {
         </nav>
 
         <div className="p-4 border-t border-slate-800 space-y-2">
+          {isSyncing && (
+             <div className="px-3 py-2 bg-blue-900/50 rounded-lg flex items-center gap-2 text-[10px] text-blue-200 font-bold mb-2 animate-pulse">
+                <RefreshCw size={12} className="animate-spin" />
+                Syncing unsaved records...
+             </div>
+          )}
+          {syncError && (
+             <div className="px-3 py-2 bg-red-900/30 border border-red-800/50 rounded-lg text-[10px] text-red-300 font-bold mb-2">
+                Sync Error. Check Network.
+                <button onClick={handleManualSync} className="block mt-1 underline hover:text-white">Retry Sync</button>
+             </div>
+          )}
+          {!isSyncing && !syncError && (equipments.some(e => e.pendingSync) || readings.some(r => r.pendingSync)) && (
+             <button onClick={handleManualSync} className="w-full px-3 py-2 bg-amber-600/20 border border-amber-600/50 text-amber-400 rounded-lg text-[10px] font-bold mb-2 flex items-center justify-center gap-2 hover:bg-amber-600/30 transition-colors">
+               <CloudOff size={12} /> Unsaved Data. Force Sync
+             </button>
+          )}
+
           <div className="flex items-center justify-between bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
             <div className="flex flex-col">
               <span className="text-white text-sm font-bold truncate max-w-[120px]">{currentUser.username}</span>
