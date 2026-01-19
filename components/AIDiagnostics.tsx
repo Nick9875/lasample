@@ -96,13 +96,20 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
     
     return uniqueRatedVoltages.map(ratedKV => {
       const eqAtRatedKV = equipmentsWithStatus.filter(e => e.ratedVoltage === ratedKV);
+      const satisfactory = eqAtRatedKV.filter(e => e.status === 'Satisfactory').length;
+      const poor = eqAtRatedKV.filter(e => e.status === 'Poor').length;
+      const critical = eqAtRatedKV.filter(e => e.status === 'Critical').length;
+      const probeFailure = eqAtRatedKV.filter(e => e.status === 'Probe Failure').length;
+      const atRisk = poor + critical + probeFailure;
       
       return {
         ratedKV,
         total: eqAtRatedKV.length,
-        satisfactory: eqAtRatedKV.filter(e => e.status === 'Satisfactory').length,
-        poor: eqAtRatedKV.filter(e => e.status === 'Poor').length,
-        critical: eqAtRatedKV.filter(e => e.status === 'Critical').length,
+        satisfactory,
+        poor,
+        critical,
+        probeFailure,
+        atRisk
       };
     });
   }, [equipments, equipmentsWithStatus]);
@@ -168,34 +175,50 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ equipments, readings, set
 
       {/* Rated kV Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        {voltageStats.map(stat => (
-          <div key={stat.ratedKV} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-            <h4 className="font-bold text-slate-800 mb-4 pb-2 border-b border-slate-50">{stat.ratedKV} kV Rated</h4>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-slate-400">Satisfactory</span>
-                <span className="font-bold text-emerald-600">{stat.satisfactory}</span>
+        {voltageStats.map(stat => {
+          const satPct = stat.total > 0 ? (stat.satisfactory / stat.total * 100).toFixed(0) : 0;
+          const riskPct = stat.total > 0 ? (stat.atRisk / stat.total * 100).toFixed(0) : 0;
+          
+          return (
+            <div key={stat.ratedKV} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+              <div>
+                <h4 className="font-bold text-slate-800 mb-4 pb-2 border-b border-slate-50">{stat.ratedKV} kV Rated</h4>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-400 font-bold">Satisfactory</span>
+                    <span className="font-bold text-emerald-600">{stat.satisfactory} <span className="text-[9px] text-slate-400 font-medium">({satPct}%)</span></span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-400 font-bold">At Risk (Total)</span>
+                    <span className="font-bold text-rose-600">{stat.atRisk} <span className="text-[9px] text-slate-400 font-medium">({riskPct}%)</span></span>
+                  </div>
+                  <div className="pl-2 border-l-2 border-slate-100 space-y-1 mt-1">
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="text-slate-400">Poor</span>
+                      <span className="font-bold text-amber-600">{stat.poor}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="text-slate-400">Critical</span>
+                      <span className="font-bold text-rose-600">{stat.critical}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="text-slate-400">Probe Fail</span>
+                      <span className="font-bold text-slate-600">{stat.probeFailure}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-slate-400">Poor</span>
-                <span className="font-bold text-amber-600">{stat.poor}</span>
-              </div>
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-slate-400">Critical</span>
-                <span className="font-bold text-rose-600">{stat.critical}</span>
+              
+              <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
+                 <div className="h-2 flex-1 bg-slate-100 rounded-full overflow-hidden flex">
+                    <div style={{width: `${satPct}%`}} className="bg-emerald-500 h-full"></div>
+                    <div style={{width: `${riskPct}%`}} className="bg-rose-500 h-full"></div>
+                 </div>
+                 <span className="ml-2 text-[10px] font-bold text-slate-400">{stat.total} Total</span>
               </div>
             </div>
-            <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
-               <div className="h-2 flex-1 bg-slate-100 rounded-full overflow-hidden flex">
-                  {/* Fix: Explicitly cast values to Number for arithmetic operations */}
-                  <div style={{width: `${Number(stat.total) > 0 ? (Number(stat.satisfactory)/Number(stat.total))*100 : 0}%`}} className="bg-emerald-500 h-full"></div>
-                  <div style={{width: `${Number(stat.total) > 0 ? (Number(stat.poor)/Number(stat.total))*100 : 0}%`}} className="bg-amber-500 h-full"></div>
-                  <div style={{width: `${Number(stat.total) > 0 ? (Number(stat.critical)/Number(stat.total))*100 : 0}%`}} className="bg-rose-500 h-full"></div>
-               </div>
-               <span className="ml-2 text-[10px] font-bold text-slate-400">{stat.total} Total</span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -288,10 +288,16 @@ const Dashboard: React.FC<DashboardProps> = ({
           const atRiskPct = v.total > 0 ? (v.AtRisk / v.total) * 100 : 0;
           return (
             <div key={v.ratedKV} className="flex-none w-56 bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col">
-              <div className="flex justify-between items-center mb-2">
+              <div className="flex justify-between items-center mb-1">
                 <span className="font-extrabold text-slate-800">{v.ratedKV} kV</span>
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Units: {v.total}</span>
               </div>
+              
+              <div className="flex justify-between text-[10px] font-bold text-slate-400 mb-1">
+                 <span className="text-emerald-600">{satisfactoryPct.toFixed(0)}% OK</span>
+                 <span className="text-orange-600">{atRiskPct.toFixed(0)}% Risk</span>
+              </div>
+
               <div className="flex gap-1 h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3">
                 <div style={{width: `${satisfactoryPct}%`}} className="bg-emerald-500 h-full"></div>
                 <div style={{width: `${atRiskPct}%`}} className="bg-orange-500 h-full"></div>
