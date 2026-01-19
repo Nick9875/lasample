@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
@@ -10,18 +11,12 @@ import {
   LogOut, 
   Database,
   Users,
-  CheckCircle2, 
-  AlertCircle, 
+  CheckCircle2,
+  AlertCircle,
   Activity,
   Cloud,
   CloudOff,
-  Loader2,
-  QrCode,
-  X,
-  ArrowRight,
-  Edit,
-  BarChart3,
-  RefreshCw
+  Loader2
 } from 'lucide-react';
 import { Equipment, Reading, UserAccount, ThresholdSettings, View, HealthStatus, GlobalHealthStats } from './types';
 import Dashboard from './components/Dashboard';
@@ -33,7 +28,6 @@ import SettingsView from './components/SettingsView';
 import ReportsView from './components/ReportsView';
 import UserManagement from './components/UserManagement';
 import { supabase } from './services/supabaseClient';
-import { Html5Qrcode } from 'html5-qrcode';
 
 const INITIAL_THRESHOLD: ThresholdSettings = {
   poorLimit: 300,
@@ -61,132 +55,17 @@ const App: React.FC = () => {
     }
   });
 
-  // Initialize Equipments from localStorage
-  const [equipments, setEquipments] = useState<Equipment[]>(() => {
-    try {
-      const stored = localStorage.getItem('arrester_equipments');
-      return stored ? JSON.parse(stored) : [];
-    } catch (e) {
-      return [];
-    }
-  });
-
-  // Initialize Readings from localStorage
-  const [readings, setReadings] = useState<Reading[]>(() => {
-    try {
-      const stored = localStorage.getItem('arrester_readings');
-      return stored ? JSON.parse(stored) : [];
-    } catch (e) {
-      return [];
-    }
-  });
-
+  const [equipments, setEquipments] = useState<Equipment[]>([]);
+  const [readings, setReadings] = useState<Reading[]>([]);
   const [settings, setSettings] = useState<ThresholdSettings>(INITIAL_THRESHOLD);
   const [loading, setLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [searchTerm] = useState('');
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
-
-  // Global QR State
-  const [showGlobalScanner, setShowGlobalScanner] = useState(false);
-  const [scannedEquipmentId, setScannedEquipmentId] = useState<string | null>(null);
-  const [showActionModal, setShowActionModal] = useState(false);
-  const [scannerError, setScannerError] = useState<string | null>(null);
-  
-  // Navigation props
-  const [targetEquipmentId, setTargetEquipmentId] = useState<string | null>(null);
-  const [dashboardFilter, setDashboardFilter] = useState<'All' | 'At Risk'>('All');
-
-  // Persistence Effects - Safer write with try/catch
-  useEffect(() => {
-    try {
-      localStorage.setItem('arrester_equipments', JSON.stringify(equipments));
-    } catch (e) {
-      console.error("LocalStorage write failed (Quota Exceeded?)", e as any);
-    }
-  }, [equipments]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('arrester_readings', JSON.stringify(readings));
-    } catch (e) {
-      console.error("LocalStorage write failed (Quota Exceeded?)", e as any);
-    }
-  }, [readings]);
-
-  // Sync Function for Pending Data
-  const syncPendingData = async (currentEquipments: Equipment[], currentReadings: Reading[]) => {
-    const pendingEq = currentEquipments.filter(e => e.pendingSync);
-    const pendingRd = currentReadings.filter(r => r.pendingSync);
-
-    if (pendingEq.length === 0 && pendingRd.length === 0) {
-      setSyncError(null);
-      return;
-    }
-
-    setIsSyncing(true);
-    setSyncError(null);
-    console.log(`Syncing ${pendingEq.length} equipment and ${pendingRd.length} readings...`);
-
-    try {
-      if (pendingEq.length > 0) {
-          const cleanEq = pendingEq.map(({ pendingSync, ...rest }) => rest);
-          const { error } = await supabase.from('equipment').upsert(cleanEq);
-          if (!error) {
-              setEquipments(prev => prev.map(e => e.pendingSync ? { ...e, pendingSync: false } : e));
-          } else {
-              if (error.message?.includes("Failed to fetch")) {
-                 setSyncError("Network unreachable. Retrying later.");
-              } else {
-                 console.error("Equipment Sync Error:", error);
-                 setSyncError(`Equipment Sync: ${error.message}`);
-              }
-          }
-      }
-
-      if (pendingRd.length > 0) {
-          // Chunk reading uploads to avoid payload limits
-          const cleanRd = pendingRd.map(({ pendingSync, ...rest }) => rest);
-          const chunkSize = 50;
-          let hasError = false;
-          
-          for (let i = 0; i < cleanRd.length; i += chunkSize) {
-             const chunk = cleanRd.slice(i, i + chunkSize);
-             const { error } = await supabase.from('readings').upsert(chunk);
-             if (error) {
-               if (error.message?.includes("Failed to fetch")) {
-                  setSyncError("Network unreachable. Retrying later.");
-               } else {
-                  console.error("Readings Sync Error (Chunk):", error);
-                  setSyncError(`Readings Sync: ${error.message}`);
-               }
-               hasError = true;
-               // Don't break, try other chunks
-             }
-          }
-          
-          // Only clear pending status if NO errors occurred
-          if (!hasError) {
-             setReadings(prev => prev.map(r => r.pendingSync ? { ...r, pendingSync: false } : r));
-          }
-      }
-    } catch (err: unknown) {
-      console.error("Sync Failed (Exception):", err);
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      setSyncError(errorMessage || "Unknown network error");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleManualSync = () => {
-    syncPendingData(equipments, readings);
-  };
 
   // Load Data from Supabase & Setup Realtime Subscriptions
   useEffect(() => {
@@ -211,110 +90,18 @@ const App: React.FC = () => {
            setUsers([DEFAULT_ADMIN]);
         }
 
-        // 3. Fetch Equipment & Robust Merge
-        let finalEquipments = [...equipments];
-        const { data: eqData, error: eqError } = await supabase.from('equipment').select('*');
-        
-        if (eqError) {
-            if (eqError.message && (eqError.message.includes("Failed to fetch") || eqError.message.includes("Network request failed"))) {
-                console.warn("App initialized in Offline Mode (DB unreachable).");
-                setIsConnected(false);
-            } else {
-                console.error("Initial Equipment Fetch Error:", eqError);
-            }
-        } else {
-            setIsConnected(true);
-        }
+        // 3. Fetch Equipment
+        const { data: eqData } = await supabase.from('equipment').select('*');
+        if (eqData) setEquipments(eqData);
 
-        if (eqData) {
-           finalEquipments = (() => {
-             const dbMap = new Map(eqData.map(e => [e.id, e]));
-             const merged: Equipment[] = [];
-             const processedIds = new Set<string>();
+        // 4. Fetch Readings
+        const { data: readingData } = await supabase.from('readings').select('*');
+        if (readingData) setReadings(readingData);
 
-             // Process Local items first
-             for (const localItem of equipments) {
-               processedIds.add(localItem.id);
-               const dbItem = dbMap.get(localItem.id);
-               
-               if (dbItem) {
-                 if (localItem.pendingSync) {
-                   merged.push(localItem);
-                 } else {
-                   merged.push(dbItem as Equipment);
-                 }
-               } else {
-                 merged.push(localItem);
-               }
-             }
-
-             for (const [id, dbItem] of dbMap) {
-               if (!processedIds.has(id)) {
-                 merged.push(dbItem as Equipment);
-               }
-             }
-             return merged;
-           })();
-           setEquipments(finalEquipments);
-        }
-
-        // 4. Fetch Readings & Robust Merge
-        let finalReadings = [...readings];
-        const { data: readingData, error: rdError } = await supabase.from('readings').select('*');
-        
-        if (rdError) {
-             if (rdError.message && (rdError.message.includes("Failed to fetch") || rdError.message.includes("Network request failed"))) {
-                // Already warned in equipment block or will set offline
-                setIsConnected(false);
-            } else {
-                console.error("Initial Readings Fetch Error:", rdError);
-            }
-        }
-
-        if (readingData) {
-           finalReadings = (() => {
-             const dbMap = new Map(readingData.map(r => [r.id, r]));
-             const merged: Reading[] = [];
-             const processedIds = new Set<string>();
-
-             for (const localItem of readings) {
-               processedIds.add(localItem.id);
-               const dbItem = dbMap.get(localItem.id);
-               
-               if (dbItem) {
-                 if (localItem.pendingSync) {
-                   merged.push(localItem);
-                 } else {
-                   merged.push(dbItem as Reading);
-                 }
-               } else {
-                 merged.push(localItem);
-               }
-             }
-
-             for (const [id, dbItem] of dbMap) {
-               if (!processedIds.has(id)) {
-                 merged.push(dbItem as Reading);
-               }
-             }
-             
-             return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-           })();
-           setReadings(finalReadings);
-        }
-
-        // Attempt to sync any pending data we found in local storage
-        syncPendingData(finalEquipments, finalReadings);
-
-      } catch (error: unknown) {
-        // If it's a network error during any part of the async process
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage && (errorMessage.includes("Failed to fetch") || errorMessage.includes("Network request failed"))) {
-             console.warn("App initialized in Offline Mode (Network Error caught).");
-             setIsConnected(false);
-        } else {
-             console.error("Failed to fetch initial data", error);
-        }
+        setIsConnected(true);
+      } catch (error) {
+        console.error("Failed to fetch initial data", error);
+        setIsConnected(false);
         setUsers([DEFAULT_ADMIN]);
       } finally {
         setLoading(false);
@@ -335,12 +122,7 @@ const App: React.FC = () => {
               return [...prev, payload.new as Equipment];
             });
           } else if (payload.eventType === 'UPDATE') {
-            setEquipments((prev) => prev.map((item) => {
-               if (item.id === payload.new.id) {
-                   return item.pendingSync ? item : (payload.new as Equipment);
-               }
-               return item;
-            }));
+            setEquipments((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Equipment : item)));
           } else if (payload.eventType === 'DELETE') {
             setEquipments((prev) => prev.filter((item) => item.id !== payload.old.id));
           }
@@ -353,18 +135,38 @@ const App: React.FC = () => {
           if (payload.eventType === 'INSERT') {
             setReadings((prev) => {
               if (prev.some(r => r.id === payload.new.id)) return prev;
-              return [payload.new as Reading, ...prev]; 
+              return [payload.new as Reading, ...prev]; // Add new reading to top
             });
           } else if (payload.eventType === 'UPDATE') {
-             setReadings((prev) => prev.map((item) => {
-               if (item.id === payload.new.id) {
-                   return item.pendingSync ? item : (payload.new as Reading);
-               }
-               return item;
-            }));
+            setReadings((prev) => prev.map((item) => (item.id === payload.new.id ? { ...item, ...payload.new } as Reading : item)));
           } else if (payload.eventType === 'DELETE') {
             setReadings((prev) => prev.filter((item) => item.id !== payload.old.id));
           }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'settings' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+             setSettings({
+               poorLimit: Number(payload.new.poorLimit),
+               criticalLimit: Number(payload.new.criticalLimit)
+             });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'user_accounts' },
+        (payload) => {
+           if (payload.eventType === 'INSERT') {
+             setUsers(prev => [...prev, payload.new as UserAccount]);
+           } else if (payload.eventType === 'UPDATE') {
+             setUsers(prev => prev.map(u => u.id === payload.new.id ? payload.new as UserAccount : u));
+           } else if (payload.eventType === 'DELETE') {
+             setUsers(prev => prev.filter(u => u.id !== payload.old.id));
+           }
         }
       )
       .subscribe();
@@ -373,58 +175,6 @@ const App: React.FC = () => {
       supabase.removeChannel(channel);
     };
   }, []);
-
-  // Global Scanner Effect
-  useEffect(() => {
-    let html5QrCode: Html5Qrcode | null = null;
-    
-    if (showGlobalScanner) {
-      setScannerError(null);
-      // Small delay to ensure modal DOM is ready
-      const timer = setTimeout(() => {
-        const elementId = "global-reader";
-        if (!document.getElementById(elementId)) return;
-
-        html5QrCode = new Html5Qrcode(elementId);
-        
-        html5QrCode.start(
-          { facingMode: "environment" }, // Prefer rear camera
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0
-          },
-          (decodedText: string) => {
-            // Success
-            const eq = equipments.find(e => e.id === decodedText);
-            if (eq) {
-              setScannedEquipmentId(eq.id);
-              setShowGlobalScanner(false);
-              setShowActionModal(true);
-              html5QrCode?.stop().catch((err) => console.error(err));
-            } else {
-              // Could add a toast here for invalid code
-              console.warn("Unknown code:", decodedText);
-            }
-          },
-          (errorMessage: any) => {
-            // Ignore frame parse errors
-          }
-        ).catch((err) => {
-          console.error("Error starting scanner:", err);
-          setScannerError("Camera access failed. Please ensure permissions are granted and you are using HTTPS.");
-        });
-      }, 300);
-
-      return () => {
-        clearTimeout(timer);
-        if (html5QrCode && html5QrCode.isScanning) {
-          html5QrCode.stop().then(() => html5QrCode?.clear()).catch((err) => console.error(err));
-        }
-      };
-    }
-  }, [showGlobalScanner, equipments]);
-
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
@@ -445,13 +195,6 @@ const App: React.FC = () => {
     setCurrentUser(null);
     localStorage.removeItem('arrester_user'); // Clear user from localStorage
     setCurrentView('dashboard');
-  };
-
-  const handleNavigateFromQR = (view: 'equipment' | 'dashboard') => {
-    setTargetEquipmentId(scannedEquipmentId);
-    setCurrentView(view);
-    setShowActionModal(false);
-    setScannedEquipmentId(null);
   };
 
   const getLatestReadingApp = (eqId: string) => {
@@ -509,7 +252,7 @@ const App: React.FC = () => {
   }, [globalHealthStats]);
 
 
-  if (loading && equipments.length === 0) { // Only show loader if we have NO data at all
+  if (loading) {
       return (
           <div className="min-h-screen bg-slate-900 flex items-center justify-center">
               <div className="text-center text-white">
@@ -567,12 +310,11 @@ const App: React.FC = () => {
                 Sign In
               </button>
             </div>
-            <div className="mt-4 flex justify-center flex-col items-center gap-1">
+            <div className="mt-4 flex justify-center">
                  {isConnected ? 
                     <span className="text-[10px] text-emerald-500 flex items-center gap-1"><Cloud size={12}/> Cloud Database Connected</span> : 
                     <span className="text-[10px] text-amber-500 flex items-center gap-1"><CloudOff size={12}/> Offline Mode / Connection Failed</span>
                  }
-                 {isSyncing && <span className="text-[10px] text-blue-400 flex items-center gap-1"><RefreshCw size={10} className="animate-spin"/> Syncing pending data...</span>}
             </div>
           </form>
         </div>
@@ -622,22 +364,12 @@ const App: React.FC = () => {
         </div>
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto no-scrollbar">
-          {/* Global Scanner Button */}
-          <button
-             onClick={() => { setIsSidebarOpen(false); setShowGlobalScanner(true); }}
-             className="flex items-center w-full px-4 py-3 mb-2 rounded-lg text-sm font-bold bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg hover:from-blue-500 hover:to-blue-600 transition-all"
-          >
-             <QrCode size={20} className="mr-3" />
-             Scan Asset QR
-          </button>
-
           {filteredMenuItems.map((item) => (
             <button
               key={item.id}
               onClick={() => {
                 setCurrentView(item.id as View);
                 setIsSidebarOpen(false);
-                setTargetEquipmentId(null); // Clear any previous deep links
               }}
               className={`
                 flex items-center w-full px-4 py-3 rounded-lg text-sm font-medium transition-colors
@@ -653,24 +385,6 @@ const App: React.FC = () => {
         </nav>
 
         <div className="p-4 border-t border-slate-800 space-y-2">
-          {isSyncing && (
-             <div className="px-3 py-2 bg-blue-900/50 rounded-lg flex items-center gap-2 text-[10px] text-blue-200 font-bold mb-2 animate-pulse">
-                <RefreshCw size={12} className="animate-spin" />
-                Syncing unsaved records...
-             </div>
-          )}
-          {syncError && (
-             <div className="px-3 py-2 bg-red-900/30 border border-red-800/50 rounded-lg text-[10px] text-red-300 font-bold mb-2">
-                Sync Error. Check Network.
-                <button onClick={handleManualSync} className="block mt-1 underline hover:text-white">Retry Sync</button>
-             </div>
-          )}
-          {!isSyncing && !syncError && (equipments.some(e => e.pendingSync) || readings.some(r => r.pendingSync)) && (
-             <button onClick={handleManualSync} className="w-full px-3 py-2 bg-amber-600/20 border border-amber-600/50 text-amber-400 rounded-lg text-[10px] font-bold mb-2 flex items-center justify-center gap-2 hover:bg-amber-600/30 transition-colors">
-               <CloudOff size={12} /> Unsaved Data. Force Sync
-             </button>
-          )}
-
           <div className="flex items-center justify-between bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
             <div className="flex flex-col">
               <span className="text-white text-sm font-bold truncate max-w-[120px]">{currentUser.username}</span>
@@ -700,10 +414,7 @@ const App: React.FC = () => {
             </button>
             
             <div className="flex flex-col">
-              <div 
-                onClick={() => { setCurrentView('dashboard'); setDashboardFilter('All'); }}
-                className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-400 mb-1 cursor-pointer hover:text-blue-600 transition-colors"
-              >
+              <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-400 mb-1">
                  <Activity size={12} /> System Health Monitor
               </div>
               <div className="flex items-center gap-3">
@@ -730,11 +441,8 @@ const App: React.FC = () => {
               <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wide">Assets:</span>
               <span className="font-bold text-slate-900">{globalHealthStats.totalAssets}</span>
             </div>
-            <div 
-              onClick={() => { setCurrentView('dashboard'); setDashboardFilter('At Risk'); }}
-              className={`bg-white border p-2 rounded-xl flex items-center gap-2 text-xs font-medium cursor-pointer transition-all active:scale-95
-                          ${globalHealthStats.atRisk > 0 ? 'border-rose-300 text-rose-700 shadow-sm hover:bg-rose-50' : 'border-emerald-200 text-emerald-700 shadow-sm hover:bg-emerald-50'}`}
-            >
+            <div className={`bg-white border p-2 rounded-xl flex items-center gap-2 text-xs font-medium 
+                          ${globalHealthStats.atRisk > 0 ? 'border-rose-300 text-rose-700 shadow-sm' : 'border-emerald-200 text-emerald-700 shadow-sm'}`}>
               {globalHealthStats.atRisk > 0 ? (
                 <>
                   <AlertCircle size={16} className="text-rose-500" />
@@ -760,10 +468,8 @@ const App: React.FC = () => {
                 readings={readings}
                 setReadings={setReadings} 
                 settings={settings} 
-                searchTerm={''} 
+                searchTerm={searchTerm} 
                 isAdmin={hasWriteAccess}
-                initialTargetId={targetEquipmentId}
-                initialStatusFilter={dashboardFilter}
               />
             )}
             {currentView === 'equipment' && (
@@ -773,8 +479,6 @@ const App: React.FC = () => {
                 readings={readings}
                 setReadings={setReadings}
                 isAdmin={hasWriteAccess} 
-                initialEditId={targetEquipmentId}
-                currentUser={currentUser}
               />
             )}
             {currentView === 'readings' && (
@@ -784,7 +488,6 @@ const App: React.FC = () => {
                 addReading={(r) => setReadings(prev => [r, ...prev])} 
                 setReadings={setReadings}
                 isAdmin={hasWriteAccess}
-                currentUser={currentUser}
               />
             )}
             {currentView === 'history' && (
@@ -841,85 +544,6 @@ const App: React.FC = () => {
           </div>
         </main>
       </div>
-
-      {/* Global QR Scanner Modal */}
-      {showGlobalScanner && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
-             <div className="p-4 bg-slate-800 text-white flex justify-between items-center relative z-20">
-                <h3 className="font-bold flex items-center gap-2"><QrCode size={18} /> Scan Asset Tag</h3>
-                <button onClick={() => setShowGlobalScanner(false)} className="p-1 hover:bg-slate-700 rounded"><X size={20} /></button>
-             </div>
-             <div className="p-4 bg-black relative">
-                <div id="global-reader" className="w-full h-72 bg-slate-900 rounded overflow-hidden"></div>
-                
-                {scannerError && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 z-10 p-6 text-center">
-                    <div>
-                      <ShieldAlert className="mx-auto text-rose-500 mb-2" size={32} />
-                      <p className="text-white text-sm font-bold mb-1">Camera Access Error</p>
-                      <p className="text-slate-400 text-xs">{scannerError}</p>
-                    </div>
-                  </div>
-                )}
-                
-                {!scannerError && (
-                  <p className="text-center text-xs text-slate-400 mt-2 absolute bottom-2 left-0 right-0 z-10 pointer-events-none">Align QR code within the frame</p>
-                )}
-             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Action Selection Modal */}
-      {showActionModal && scannedEquipmentId && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95">
-             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-               <div>
-                 <h3 className="text-lg font-bold text-slate-800">Asset Detected</h3>
-                 <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">
-                   {equipments.find(e => e.id === scannedEquipmentId)?.name || 'Unknown Asset'}
-                 </p>
-               </div>
-               <button onClick={() => { setShowActionModal(false); setScannedEquipmentId(null); }} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
-             </div>
-             <div className="p-8 grid grid-cols-1 gap-4">
-                <button 
-                  onClick={() => handleNavigateFromQR('equipment')}
-                  className="group flex items-center justify-between p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-500 hover:bg-blue-50 transition-all text-left"
-                >
-                   <div className="flex items-center gap-4">
-                      <div className="p-3 bg-blue-100 text-blue-600 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                        <Edit size={24} />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-slate-800 group-hover:text-blue-700">Edit Equipment Metadata</h4>
-                        <p className="text-xs text-slate-500">Modify properties, location, or ratings</p>
-                      </div>
-                   </div>
-                   <ArrowRight size={20} className="text-slate-300 group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
-                </button>
-
-                <button 
-                  onClick={() => handleNavigateFromQR('dashboard')}
-                  className="group flex items-center justify-between p-4 rounded-2xl border-2 border-slate-100 hover:border-emerald-500 hover:bg-emerald-50 transition-all text-left"
-                >
-                   <div className="flex items-center gap-4">
-                      <div className="p-3 bg-emerald-100 text-emerald-600 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                        <BarChart3 size={24} />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-slate-800 group-hover:text-emerald-700">Operational Health Overview</h4>
-                        <p className="text-xs text-slate-500">View live status, trends, and history</p>
-                      </div>
-                   </div>
-                   <ArrowRight size={20} className="text-slate-300 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all" />
-                </button>
-             </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

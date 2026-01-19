@@ -20,7 +20,6 @@ export interface Equipment {
   model: string;
   mcovRating: number;
   statusOverride?: HealthStatus | null;
-  pendingSync?: boolean;
 }
 
 export interface Reading {
@@ -33,9 +32,6 @@ export interface Reading {
   mcovRating: number;
   ratedVoltage: number; // numerical L-L kV
   notes?: string;
-  recordedBy?: string;
-  counterCount?: number;
-  pendingSync?: boolean;
 }
 
 export interface ThresholdSettings {

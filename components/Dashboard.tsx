@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   LineChart as ReLineChart, 
   Line, 
@@ -39,8 +39,6 @@ interface DashboardProps {
   settings: ThresholdSettings;
   searchTerm: string;
   isAdmin: boolean;
-  initialTargetId?: string | null;
-  initialStatusFilter?: 'All' | 'At Risk';
 }
 
 interface DashboardItem extends Equipment {
@@ -48,7 +46,7 @@ interface DashboardItem extends Equipment {
   status: HealthStatus;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readings, setReadings, settings, searchTerm, isAdmin, initialTargetId, initialStatusFilter }) => {
+const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readings, setReadings, settings, searchTerm, isAdmin }) => {
   const [selectedTrendIds, setSelectedTrendIds] = useState<string[]>([]);
   const [trendSearch, setTrendSearch] = useState('');
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null);
@@ -63,34 +61,6 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
     showResistive: true, 
     showCorrected: true 
   });
-
-  // Handle Deep Linking / Auto-Filter for Equipment
-  useEffect(() => {
-    if (initialTargetId) {
-       const eq = equipments.find(e => e.id === initialTargetId);
-       if (eq) {
-         setTableSearch(eq.name); // Filter table by name
-         setTableStatusFilter('All');
-         setTableRatedKVFilter('All');
-         
-         // Highlight in Trend Analysis
-         setSelectedTrendIds([initialTargetId]);
-         const element = document.getElementById('trend-analysis-section');
-         if (element) {
-           setTimeout(() => element.scrollIntoView({ behavior: 'smooth', block: 'center' }), 500);
-         }
-       }
-    }
-  }, [initialTargetId, equipments]);
-
-  // Handle Initial Status Filter (e.g. from Header "Action Required" click)
-  useEffect(() => {
-    if (initialStatusFilter && initialStatusFilter !== 'All') {
-        setTableStatusFilter(initialStatusFilter);
-    } else {
-        setTableStatusFilter('All');
-    }
-  }, [initialStatusFilter]);
 
   const getStatus = (eq: Equipment, latest?: Reading): HealthStatus => {
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;
@@ -405,90 +375,6 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
         </div>
       </div>
 
-      {/* Trend Analysis Chart */}
-      <div id="trend-analysis-section" className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-              <Activity className="text-blue-500" size={20} />
-              Trend Analysis
-            </h3>
-            <p className="text-xs text-slate-400 font-medium">
-              {selectedTrendIds.length > 0 
-                ? `Comparing ${selectedTrendIds.length} Asset(s)` 
-                : "Select assets from the table or alarms to view trends"}
-            </p>
-          </div>
-          
-          <div className="flex flex-wrap gap-2 bg-slate-50 p-1 rounded-xl">
-             <button 
-               onClick={() => setChartOptions({...chartOptions, showTotal: !chartOptions.showTotal})}
-               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showTotal ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               Total
-             </button>
-             <button 
-               onClick={() => setChartOptions({...chartOptions, showResistive: !chartOptions.showResistive})}
-               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showResistive ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               Resistive
-             </button>
-             <button 
-               onClick={() => setChartOptions({...chartOptions, showCorrected: !chartOptions.showCorrected})}
-               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showCorrected ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               Corrected
-             </button>
-          </div>
-        </div>
-
-        <div className="h-[350px] w-full">
-          {selectedTrendIds.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <ReLineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="date" tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} dy={10} />
-                <YAxis tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} width={30} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
-                  labelStyle={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px' }}
-                />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                
-                {selectedTrendIds.map((id, index) => {
-                  const eq = equipments.find(e => e.id === id);
-                  if (!eq) return null;
-                  // Generate deterministic colors based on index
-                  const colors = ['#2563eb', '#db2777', '#ca8a04', '#16a34a', '#9333ea', '#ea580c'];
-                  const baseColor = colors[index % colors.length];
-                  
-                  return (
-                    <React.Fragment key={id}>
-                      {chartOptions.showTotal && (
-                        <Line type="monotone" dataKey={`${eq.name}_total`} name={`${eq.name} (Total)`} stroke="#94a3b8" strokeDasharray="3 3" dot={false} strokeWidth={1} />
-                      )}
-                      {chartOptions.showResistive && (
-                        <Line type="monotone" dataKey={`${eq.name}_resistive`} name={`${eq.name} (Res)`} stroke={baseColor} strokeOpacity={0.4} dot={false} strokeWidth={1} />
-                      )}
-                      {chartOptions.showCorrected && (
-                        <Line type="monotone" dataKey={`${eq.name}_corrected`} name={`${eq.name} (Corr)`} stroke={baseColor} strokeWidth={3} dot={{ r: 3, fill: baseColor, strokeWidth: 0 }} activeDot={{ r: 6 }} />
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </ReLineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-slate-300">
-               <Activity size={48} className="mb-2 opacity-50" />
-               <p className="text-sm font-bold">No assets selected for analysis</p>
-               <p className="text-xs">Click asset names in the table below to add them to this chart</p>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Operational Health Overview Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -589,6 +475,94 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
         <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex justify-between items-center text-[10px] font-bold text-slate-400">
            <span>Displaying top {tableItems.length} matching assets</span>
            <button onClick={() => { setTableSearch(''); setTableStatusFilter('All'); setTableRatedKVFilter('All'); }} className="text-blue-600 hover:underline transition-colors font-bold uppercase">Reset Filters</button>
+        </div>
+      </div>
+
+      {/* Historical Trend Analysis Card */}
+      <div id="trend-analysis-section" className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-4">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2"><TrendingUp size={18} className="text-blue-500" /> Trend Analysis</h3>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+            <input 
+              type="text" placeholder="Search asset unit..." 
+              className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+              value={trendSearch} onChange={e => setTrendSearch(e.target.value)}
+            />
+          </div>
+          <div className="flex-1 max-h-48 overflow-y-auto no-scrollbar border border-slate-100 rounded-xl p-2 space-y-1 bg-slate-50/50">
+            {equipments.filter(e => e.name.toLowerCase().includes(trendSearch.toLowerCase())).map(eq => (
+              <button
+                key={eq.id} onClick={() => toggleTrendSelection(eq.id)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex justify-between items-center ${selectedTrendIds.includes(eq.id) ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-white text-slate-600'}`}
+              >
+                <span className="truncate">{eq.name}</span>
+                {selectedTrendIds.includes(eq.id) && <Check size={12} />}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-2 pt-2 border-t border-slate-50">
+             <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 cursor-pointer hover:text-blue-600 transition-colors">
+              <input type="checkbox" checked={chartOptions.showTotal} onChange={e => setChartOptions({...chartOptions, showTotal: e.target.checked})} className="rounded text-blue-600" /> Total Leakage (uA)
+            </label>
+             <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 cursor-pointer hover:text-blue-600 transition-colors">
+              <input type="checkbox" checked={chartOptions.showResistive} onChange={e => setChartOptions({...chartOptions, showResistive: e.target.checked})} className="rounded text-blue-600" /> Resistive Base (uA)
+            </label>
+            <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 cursor-pointer hover:text-blue-600 transition-colors">
+              <input type="checkbox" checked={chartOptions.showCorrected} onChange={e => setChartOptions({...chartOptions, showCorrected: e.target.checked})} className="rounded text-blue-600" /> Corrected Resistive (uA)
+            </label>
+          </div>
+        </div>
+
+        <div className="lg:col-span-3 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-h-[400px]">
+          {selectedTrendIds.length > 0 ? (
+            <div className="h-[380px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <ReLineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="date" fontSize={10} tick={{fill: '#64748b'}} tickLine={false} axisLine={false} />
+                  <YAxis fontSize={10} tick={{fill: '#64748b'}} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', fontSize: '10px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} />
+                  <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: '10px', paddingBottom: '10px' }} />
+                  {selectedTrendIds.map((id, index) => {
+                    const eq = equipments.find(e => e.id === id);
+                    if (!eq) return null;
+                    
+                    // Define color palettes for different equipment selections
+                    const colorPalettes = [
+                      { corrected: "#ef4444", resistive: "#10b981", total: "#3b82f6" },   // Palette 1: Red, Green, Blue
+                      { corrected: "#f59e0b", resistive: "#8b5cf6", total: "#ec4899" },   // Palette 2: Amber, Violet, Pink
+                      { corrected: "#0d9488", resistive: "#d946ef", total: "#64748b" },   // Palette 3: Teal, Fuchsia, Slate
+                      { corrected: "#65a30d", resistive: "#ea580c", total: "#4f46e5" },   // Palette 4: Lime, Orange, Indigo
+                    ];
+                    const palette = colorPalettes[index % colorPalettes.length];
+
+                    // Use line style to differentiate between multiple selected equipments
+                    const lineStyles = [
+                      { }, // solid for first equipment
+                      { strokeDasharray: "8 4" }, // dashed for second
+                      { strokeDasharray: "2 6" }, // dotted for third
+                      { strokeDasharray: "8 4 2 4" }, // dash-dot for fourth
+                    ];
+                    const style = lineStyles[index % lineStyles.length];
+                    
+                    return (
+                      <React.Fragment key={id}>
+                        {chartOptions.showTotal && <Line type="monotone" dataKey={`${eq.name}_total`} name={`${eq.name} (Tot)`} stroke={palette.total} strokeWidth={2} dot={{r: 2}} {...style} />}
+                        {chartOptions.showResistive && <Line type="monotone" dataKey={`${eq.name}_resistive`} name={`${eq.name} (Res)`} stroke={palette.resistive} strokeWidth={2} dot={{r: 2}} {...style} />}
+                        {chartOptions.showCorrected && <Line type="monotone" dataKey={`${eq.name}_corrected`} name={`${eq.name} (Corr)`} stroke={palette.corrected} strokeWidth={3} dot={{r: 4, strokeWidth: 2, fill: 'white'}} {...style} />}
+                      </React.Fragment>
+                    );
+                  })}
+                </ReLineChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center text-slate-300 space-y-4 py-24 border-2 border-dashed border-slate-100 rounded-2xl bg-slate-50/30">
+              <TrendingUp size={64} className="opacity-10" />
+              <p className="font-bold text-xs uppercase tracking-widest text-slate-400">Select asset units to visualize historical leakage trends</p>
+            </div>
+          )}
         </div>
       </div>
 

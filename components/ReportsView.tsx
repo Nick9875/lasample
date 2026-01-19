@@ -17,8 +17,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
     district: 'All',
     substation: 'All',
     brand: 'All',
-    model: 'All',
-    status: 'All'
+    model: 'All'
   });
 
   const [selectedReadingIds, setSelectedReadingIds] = useState<Set<string>>(new Set());
@@ -28,30 +27,18 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
   const brands = useMemo(() => ['All', ...Array.from(new Set(equipments.map(e => e.brand))).sort()], [equipments]);
   const models = useMemo(() => ['All', ...Array.from(new Set(equipments.map(e => e.model))).sort()], [equipments]);
 
-  // Helper to calculate status for a reading based on thresholds
-  const getReadingStatus = (val: number): string => {
-    if (val === 0) return 'Probe Failure';
-    if (val > settings.criticalLimit) return 'Critical';
-    if (val > settings.poorLimit) return 'Poor';
-    return 'Satisfactory';
-  };
-
   const filteredReadings = useMemo(() => {
     return readings.filter(r => {
       const eq = equipments.find(e => e.id === r.equipmentId);
       if (!eq) return false;
-
-      const status = getReadingStatus(r.correctedResistiveCurrent);
-
       return (
         (filters.district === 'All' || eq.district === filters.district) &&
         (filters.substation === 'All' || eq.substation === filters.substation) &&
         (filters.brand === 'All' || eq.brand === filters.brand) &&
-        (filters.model === 'All' || eq.model === filters.model) &&
-        (filters.status === 'All' || status === filters.status)
+        (filters.model === 'All' || eq.model === filters.model)
       );
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [readings, equipments, filters, settings]);
+  }, [readings, equipments, filters]);
 
   const toggleAll = () => {
     if (selectedReadingIds.size === filteredReadings.length && filteredReadings.length > 0) {
@@ -71,7 +58,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
   const selectedData = useMemo(() => {
     return readings.filter(r => selectedReadingIds.has(r.id)).map(r => {
       const eq = equipments.find(e => e.id === r.equipmentId);
-      const status = getReadingStatus(r.correctedResistiveCurrent);
+      const status = r.correctedResistiveCurrent > settings.criticalLimit ? 'Critical' : r.correctedResistiveCurrent > settings.poorLimit ? 'Poor' : 'Satisfactory';
       return {
         Date: formatDisplayDate(r.date),
         Equipment: eq?.name,
@@ -109,7 +96,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
         </div>
       </div>
 
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
           <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">District</label>
           <select className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none shadow-sm focus:ring-2 focus:ring-blue-500" value={filters.district} onChange={e => setFilters({...filters, district: e.target.value})}>
@@ -132,16 +119,6 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
           <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Model</label>
           <select className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none shadow-sm focus:ring-2 focus:ring-blue-500" value={filters.model} onChange={e => setFilters({...filters, model: e.target.value})}>
             {models.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Status</label>
-          <select className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none shadow-sm focus:ring-2 focus:ring-blue-500" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})}>
-            <option value="All">All Statuses</option>
-            <option value="Satisfactory">Satisfactory</option>
-            <option value="Poor">Poor</option>
-            <option value="Critical">Critical</option>
-            <option value="Probe Failure">Probe Failure</option>
           </select>
         </div>
       </div>
@@ -171,20 +148,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
                 <th className="px-6 py-4 bg-white">Equipment Unit</th>
                 <th className="px-6 py-4 bg-white">Substation</th>
                 <th className="px-6 py-4 bg-white font-bold text-blue-600">Corrected</th>
-                <th className="px-6 py-4 bg-white">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredReadings.length > 0 ? filteredReadings.map(r => {
                 const eq = equipments.find(e => e.id === r.equipmentId);
                 const isSelected = selectedReadingIds.has(r.id);
-                const status = getReadingStatus(r.correctedResistiveCurrent);
-                
-                let statusColor = "text-slate-500";
-                if (status === 'Critical') statusColor = "text-rose-600 font-bold";
-                if (status === 'Poor') statusColor = "text-amber-600 font-bold";
-                if (status === 'Satisfactory') statusColor = "text-emerald-600";
-
                 return (
                   <tr key={r.id} className={`${isSelected ? 'bg-blue-50/50' : 'hover:bg-slate-50'} transition-colors cursor-pointer`} onClick={() => toggleOne(r.id)}>
                     <td className="px-6 py-4">
@@ -196,12 +165,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ equipments, readings, setting
                     <td className="px-6 py-4 font-bold text-slate-800">{eq?.name || 'N/A'}</td>
                     <td className="px-6 py-4 text-slate-500">{eq?.substation || 'N/A'}</td>
                     <td className="px-6 py-4 font-mono font-bold text-blue-600">{r.correctedResistiveCurrent} uA</td>
-                    <td className={`px-6 py-4 text-xs ${statusColor}`}>{status}</td>
                   </tr>
                 );
               }) : (
                 <tr>
-                  <td colSpan={6} className="py-24 text-center">
+                  <td colSpan={5} className="py-24 text-center">
                     <Filter className="mx-auto text-slate-200 mb-4" size={48} />
                     <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No records matching active filters</p>
                   </td>
