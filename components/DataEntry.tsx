@@ -1,10 +1,11 @@
 
-import React, { useState, useMemo, useRef } from 'react';
-import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2 } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2, QrCode } from 'lucide-react';
 import { Equipment, Reading } from '../types';
 import { parseInputDate } from '../utils/reports';
 import * as XLSX from 'xlsx';
 import { supabase } from '../services/supabaseClient';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 interface DataEntryProps {
   equipments: Equipment[];
@@ -40,6 +41,41 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     resistive: '',
     corrected: ''
   });
+
+  const [showScanner, setShowScanner] = useState(false);
+
+  useEffect(() => {
+    let scanner: Html5QrcodeScanner | null = null;
+    if (showScanner) {
+      scanner = new Html5QrcodeScanner(
+        "reader", 
+        { fps: 10, qrbox: { width: 250, height: 250 } }, 
+        /* verbose= */ false
+      );
+      scanner.render((decodedText) => {
+        // Success callback
+        // The QR code contains the equipment ID
+        const eq = equipments.find(e => e.id === decodedText);
+        if (eq) {
+            setFormData(prev => ({ ...prev, equipmentId: eq.id }));
+            setShowScanner(false);
+            scanner?.clear();
+        } else {
+            alert(`Equipment ID not found: ${decodedText}`);
+            // Optional: Keep scanner open to try again
+        }
+      }, (errorMessage) => {
+        // Error callback (ignore for scanning in progress)
+      });
+    }
+
+    return () => {
+        if (scanner) {
+            scanner.clear().catch(error => console.error("Failed to clear scanner", error));
+        }
+    };
+  }, [showScanner, equipments]);
+
 
   const districts = useMemo(() => Array.from(new Set(equipments.map(e => e.district))).sort(), [equipments]);
   const substationsForFilter = useMemo(() => {
@@ -377,7 +413,16 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
         <form onSubmit={handleIndividualSubmit} className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm space-y-8 animate-in fade-in slide-in-from-bottom-2">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="md:col-span-2">
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Selected Arrester Unit</label>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block text-xs font-bold text-slate-500 uppercase">Selected Arrester Unit</label>
+                <button 
+                  type="button"
+                  onClick={() => setShowScanner(true)}
+                  className="text-xs font-bold text-blue-600 flex items-center gap-1 hover:text-blue-700 transition-colors"
+                >
+                  <QrCode size={14} /> Scan QR Code
+                </button>
+              </div>
               <select required className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={formData.equipmentId} onChange={e => setFormData({...formData, equipmentId: e.target.value})}>
                 <option value="">-- Select Asset --</option>
                 {equipments.filter(e => !filterSubstation || e.substation === filterSubstation).map(e => <option key={e.id} value={e.id}>{e.name} • {e.substation}</option>)}
@@ -583,6 +628,21 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showScanner && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[130] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+             <div className="p-4 bg-slate-800 text-white flex justify-between items-center">
+                <h3 className="font-bold flex items-center gap-2"><QrCode size={18} /> Scan Equipment QR</h3>
+                <button onClick={() => setShowScanner(false)} className="p-1 hover:bg-slate-700 rounded"><X size={20} /></button>
+             </div>
+             <div className="p-4 bg-black">
+                <div id="reader" className="w-full h-64 bg-slate-900"></div>
+                <p className="text-center text-xs text-slate-400 mt-2">Align QR code within the frame</p>
+             </div>
           </div>
         </div>
       )}

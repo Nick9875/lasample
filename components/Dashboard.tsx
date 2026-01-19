@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LineChart as ReLineChart, 
   Line, 
@@ -39,6 +39,7 @@ interface DashboardProps {
   settings: ThresholdSettings;
   searchTerm: string;
   isAdmin: boolean;
+  initialTargetId?: string | null;
 }
 
 interface DashboardItem extends Equipment {
@@ -46,7 +47,7 @@ interface DashboardItem extends Equipment {
   status: HealthStatus;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readings, setReadings, settings, searchTerm, isAdmin }) => {
+const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readings, setReadings, settings, searchTerm, isAdmin, initialTargetId }) => {
   const [selectedTrendIds, setSelectedTrendIds] = useState<string[]>([]);
   const [trendSearch, setTrendSearch] = useState('');
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null);
@@ -61,6 +62,25 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
     showResistive: true, 
     showCorrected: true 
   });
+
+  // Handle Deep Linking / Auto-Filter
+  useEffect(() => {
+    if (initialTargetId) {
+       const eq = equipments.find(e => e.id === initialTargetId);
+       if (eq) {
+         setTableSearch(eq.name); // Filter table by name
+         setTableStatusFilter('All');
+         setTableRatedKVFilter('All');
+         
+         // Highlight in Trend Analysis
+         setSelectedTrendIds([initialTargetId]);
+         const element = document.getElementById('trend-analysis-section');
+         if (element) {
+           setTimeout(() => element.scrollIntoView({ behavior: 'smooth', block: 'center' }), 500);
+         }
+       }
+    }
+  }, [initialTargetId, equipments]);
 
   const getStatus = (eq: Equipment, latest?: Reading): HealthStatus => {
     if (eq.statusOverride) return eq.statusOverride as HealthStatus;

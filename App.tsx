@@ -16,7 +16,12 @@ import {
   Activity,
   Cloud,
   CloudOff,
-  Loader2
+  Loader2,
+  QrCode,
+  X,
+  ArrowRight,
+  Edit,
+  BarChart3
 } from 'lucide-react';
 import { Equipment, Reading, UserAccount, ThresholdSettings, View, HealthStatus, GlobalHealthStats } from './types';
 import Dashboard from './components/Dashboard';
@@ -28,6 +33,7 @@ import SettingsView from './components/SettingsView';
 import ReportsView from './components/ReportsView';
 import UserManagement from './components/UserManagement';
 import { supabase } from './services/supabaseClient';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 const INITIAL_THRESHOLD: ThresholdSettings = {
   poorLimit: 300,
@@ -62,10 +68,17 @@ const App: React.FC = () => {
 
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [searchTerm] = useState('');
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
+
+  // Global QR State
+  const [showGlobalScanner, setShowGlobalScanner] = useState(false);
+  const [scannedEquipmentId, setScannedEquipmentId] = useState<string | null>(null);
+  const [showActionModal, setShowActionModal] = useState(false);
+  
+  // Navigation props
+  const [targetEquipmentId, setTargetEquipmentId] = useState<string | null>(null);
 
   // Load Data from Supabase & Setup Realtime Subscriptions
   useEffect(() => {
@@ -176,6 +189,35 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // Global Scanner Effect
+  useEffect(() => {
+    let scanner: Html5QrcodeScanner | null = null;
+    if (showGlobalScanner) {
+      scanner = new Html5QrcodeScanner(
+        "global-reader", 
+        { fps: 10, qrbox: { width: 250, height: 250 } }, 
+        /* verbose= */ false
+      );
+      scanner.render((decodedText) => {
+        const eq = equipments.find(e => e.id === decodedText);
+        if (eq) {
+          setScannedEquipmentId(eq.id);
+          setShowGlobalScanner(false);
+          setShowActionModal(true);
+          scanner?.clear();
+        } else {
+          alert("Equipment ID not found in inventory.");
+        }
+      }, (errorMessage) => {
+        // ignore errors
+      });
+    }
+    return () => {
+      if (scanner) scanner.clear().catch(console.error);
+    };
+  }, [showGlobalScanner, equipments]);
+
+
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
   const handleLogin = (e: React.FormEvent) => {
@@ -195,6 +237,13 @@ const App: React.FC = () => {
     setCurrentUser(null);
     localStorage.removeItem('arrester_user'); // Clear user from localStorage
     setCurrentView('dashboard');
+  };
+
+  const handleNavigateFromQR = (view: 'equipment' | 'dashboard') => {
+    setTargetEquipmentId(scannedEquipmentId);
+    setCurrentView(view);
+    setShowActionModal(false);
+    setScannedEquipmentId(null);
   };
 
   const getLatestReadingApp = (eqId: string) => {
@@ -364,12 +413,22 @@ const App: React.FC = () => {
         </div>
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto no-scrollbar">
+          {/* Global Scanner Button */}
+          <button
+             onClick={() => { setIsSidebarOpen(false); setShowGlobalScanner(true); }}
+             className="flex items-center w-full px-4 py-3 mb-2 rounded-lg text-sm font-bold bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg hover:from-blue-500 hover:to-blue-600 transition-all"
+          >
+             <QrCode size={20} className="mr-3" />
+             Scan Asset QR
+          </button>
+
           {filteredMenuItems.map((item) => (
             <button
               key={item.id}
               onClick={() => {
                 setCurrentView(item.id as View);
                 setIsSidebarOpen(false);
+                setTargetEquipmentId(null); // Clear any previous deep links
               }}
               className={`
                 flex items-center w-full px-4 py-3 rounded-lg text-sm font-medium transition-colors
@@ -468,8 +527,9 @@ const App: React.FC = () => {
                 readings={readings}
                 setReadings={setReadings} 
                 settings={settings} 
-                searchTerm={searchTerm} 
+                searchTerm={''} 
                 isAdmin={hasWriteAccess}
+                initialTargetId={targetEquipmentId}
               />
             )}
             {currentView === 'equipment' && (
@@ -479,6 +539,7 @@ const App: React.FC = () => {
                 readings={readings}
                 setReadings={setReadings}
                 isAdmin={hasWriteAccess} 
+                initialEditId={targetEquipmentId}
               />
             )}
             {currentView === 'readings' && (
@@ -544,6 +605,72 @@ const App: React.FC = () => {
           </div>
         </main>
       </div>
+
+      {/* Global QR Scanner Modal */}
+      {showGlobalScanner && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+             <div className="p-4 bg-slate-800 text-white flex justify-between items-center">
+                <h3 className="font-bold flex items-center gap-2"><QrCode size={18} /> Scan Asset Tag</h3>
+                <button onClick={() => setShowGlobalScanner(false)} className="p-1 hover:bg-slate-700 rounded"><X size={20} /></button>
+             </div>
+             <div className="p-4 bg-black">
+                <div id="global-reader" className="w-full h-64 bg-slate-900"></div>
+                <p className="text-center text-xs text-slate-400 mt-2">Align QR code within the frame</p>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Action Selection Modal */}
+      {showActionModal && scannedEquipmentId && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95">
+             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+               <div>
+                 <h3 className="text-lg font-bold text-slate-800">Asset Detected</h3>
+                 <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">
+                   {equipments.find(e => e.id === scannedEquipmentId)?.name || 'Unknown Asset'}
+                 </p>
+               </div>
+               <button onClick={() => { setShowActionModal(false); setScannedEquipmentId(null); }} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
+             </div>
+             <div className="p-8 grid grid-cols-1 gap-4">
+                <button 
+                  onClick={() => handleNavigateFromQR('equipment')}
+                  className="group flex items-center justify-between p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-500 hover:bg-blue-50 transition-all text-left"
+                >
+                   <div className="flex items-center gap-4">
+                      <div className="p-3 bg-blue-100 text-blue-600 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                        <Edit size={24} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-800 group-hover:text-blue-700">Edit Equipment Metadata</h4>
+                        <p className="text-xs text-slate-500">Modify properties, location, or ratings</p>
+                      </div>
+                   </div>
+                   <ArrowRight size={20} className="text-slate-300 group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
+                </button>
+
+                <button 
+                  onClick={() => handleNavigateFromQR('dashboard')}
+                  className="group flex items-center justify-between p-4 rounded-2xl border-2 border-slate-100 hover:border-emerald-500 hover:bg-emerald-50 transition-all text-left"
+                >
+                   <div className="flex items-center gap-4">
+                      <div className="p-3 bg-emerald-100 text-emerald-600 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                        <BarChart3 size={24} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-800 group-hover:text-emerald-700">Operational Health Overview</h4>
+                        <p className="text-xs text-slate-500">View live status, trends, and history</p>
+                      </div>
+                   </div>
+                   <ArrowRight size={20} className="text-slate-300 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all" />
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

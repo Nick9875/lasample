@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Plus, 
   Edit2, 
@@ -16,11 +16,16 @@ import {
   Save,
   Check,
   Calendar,
-  Activity
+  Activity,
+  QrCode,
+  Printer,
+  FileDown
 } from 'lucide-react';
 import { Equipment, Reading, HealthStatus } from '../types';
 import { formatDisplayDate } from '../utils/reports';
 import { supabase } from '../services/supabaseClient';
+import QRCode from 'qrcode';
+import { jsPDF } from 'jspdf';
 
 interface EquipmentManagerProps {
   equipments: Equipment[];
@@ -28,9 +33,10 @@ interface EquipmentManagerProps {
   readings: Reading[];
   setReadings: React.Dispatch<React.SetStateAction<Reading[]>>;
   isAdmin: boolean;
+  initialEditId?: string | null;
 }
 
-const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEquipments, readings, setReadings, isAdmin }) => {
+const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEquipments, readings, setReadings, isAdmin, initialEditId }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentEquipment, setCurrentEquipment] = useState<Partial<Equipment>>({});
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
@@ -39,6 +45,11 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [ratedVoltageFilter, setRatedVoltageFilter] = useState<number | 'All'>('All');
+
+  // Checkbox Selection State
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showQRPreview, setShowQRPreview] = useState(false);
+  const [previewQRs, setPreviewQRs] = useState<{id: string, name: string, substation: string, dataUrl: string}[]>([]);
 
   // Declare state for adding new readings
   const [isAddingReading, setIsAddingReading] = useState<string | null>(null);
@@ -57,6 +68,17 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     const uniqueVoltages = Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: number, b: number) => a - b);
     return ['All', ...uniqueVoltages.map(String)]; 
   }, [equipments]);
+
+  // Handle Deep Linking / Auto-Opening Edit Modal
+  useEffect(() => {
+    if (initialEditId) {
+      const eq = equipments.find(e => e.id === initialEditId);
+      if (eq) {
+        setCurrentEquipment(eq);
+        setIsEditing(true);
+      }
+    }
+  }, [initialEditId, equipments]);
 
   useEffect(() => {
     if (currentEquipment.ratedVoltage !== undefined) {
@@ -179,6 +201,28 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
       
       setEquipments(prev => prev.filter(e => e.id !== id));
       setReadings(prev => prev.filter(r => r.equipmentId !== id));
+      // Remove from selection if deleted
+      if (selectedIds.has(id)) {
+        const next = new Set(selectedIds);
+        next.delete(id);
+        setSelectedIds(next);
+      }
+    }
+  };
+
+  // Selection Logic
+  const toggleSelection = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredEquipmentsList.length && filteredEquipmentsList.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredEquipmentsList.map(e => e.id)));
     }
   };
 
@@ -242,7 +286,6 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
 
   // Function to synchronize mcovRating and ratedVoltage for all readings
   const handleSyncReadingsMetadata = () => {
-    // This functionality might be redundant with real-time DB but kept for local state consistency
     const updatedReadings = readings.map(reading => {
       const parentEquipment = equipments.find(eq => eq.id === reading.equipmentId);
       if (parentEquipment) {
@@ -264,6 +307,80 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
     }
   }, [equipments.length, readings.length]);
 
+  const prepareQRPreview = async () => {
+    if (selectedIds.size === 0) {
+      alert("Please select at least one equipment unit.");
+      return;
+    }
+
+    const selectedItems = equipments.filter(e => selectedIds.has(e.id));
+    const previews = [];
+
+    for (const eq of selectedItems) {
+      try {
+        const dataUrl = await QRCode.toDataURL(eq.id, { margin: 1, width: 200 });
+        previews.push({
+          id: eq.id,
+          name: eq.name,
+          substation: eq.substation,
+          dataUrl
+        });
+      } catch (err) {
+        console.error("QR Gen Error", err);
+      }
+    }
+    setPreviewQRs(previews);
+    setShowQRPreview(true);
+  };
+
+  const generateQRCodesPDF = () => {
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const margin = 10;
+    const qrSize = 38; // 1.5 inches approx 38.1mm
+    const spacing = 6;
+    const cols = Math.floor((pageWidth - 2 * margin) / (qrSize + spacing));
+    const rows = Math.floor((pageHeight - 2 * margin) / (qrSize + spacing + 10)); // +10 for text label
+
+    let col = 0;
+    let row = 0;
+
+    for (let i = 0; i < previewQRs.length; i++) {
+      const item = previewQRs[i];
+      
+      const x = margin + col * (qrSize + spacing);
+      const y = margin + row * (qrSize + spacing + 10);
+
+      doc.addImage(item.dataUrl, 'PNG', x, y, qrSize, qrSize);
+      
+      // Add Label
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text(item.name.substring(0, 18), x + qrSize / 2, y + qrSize + 4, { align: 'center' });
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.text(item.substation.substring(0, 20), x + qrSize / 2, y + qrSize + 8, { align: 'center' });
+
+      col++;
+      if (col >= cols) {
+        col = 0;
+        row++;
+        if (row >= rows && i < previewQRs.length - 1) {
+          doc.addPage();
+          row = 0;
+        }
+      }
+    }
+
+    doc.save(`ArresterGuard_QRs_${new Date().toISOString().split('T')[0]}.pdf`);
+    setShowQRPreview(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -273,6 +390,13 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
           <p className="text-slate-500 text-sm">Consolidated parent-child asset management</p>
         </div>
         <div className="flex items-center gap-2">
+           <button 
+             onClick={prepareQRPreview}
+             className="bg-white border border-slate-200 text-slate-700 hover:text-blue-600 hover:border-blue-200 px-4 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-sm transition-all text-xs"
+             title="Print QR labels for selected items"
+           >
+             <Printer size={16} /> Print {selectedIds.size > 0 ? `(${selectedIds.size})` : ''} Labels
+           </button>
           {isAdmin && (
             <>
               <button 
@@ -331,6 +455,19 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
             <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}><List size={18} /></button>
           </div>
         </div>
+      </div>
+
+      <div className="flex items-center gap-4 px-2">
+         <label className="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
+           <input 
+             type="checkbox" 
+             checked={selectedIds.size > 0 && selectedIds.size === filteredEquipmentsList.length}
+             onChange={toggleSelectAll}
+             className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+           />
+           Select All
+         </label>
+         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{selectedIds.size} Selected</span>
       </div>
 
       {isEditing && (
@@ -404,7 +541,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
         </div>
       )}
 
-      {/* Grid/List View mapping remains the same, just showing the container */}
+      {/* Grid/List View */}
       <div className={`${viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6' : 'space-y-4'}`}>
         {filteredEquipmentsList.map(eq => {
           const isExpanded = expandedId === eq.id;
@@ -416,6 +553,14 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
             <div key={eq.id} className={`bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-300 ${isExpanded ? 'ring-2 ring-blue-500' : 'hover:shadow-md'}`}>
               <div className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-start gap-4">
+                  <div className="flex items-center justify-center pt-1">
+                     <input 
+                       type="checkbox" 
+                       checked={selectedIds.has(eq.id)} 
+                       onChange={() => toggleSelection(eq.id)}
+                       className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                     />
+                  </div>
                   <div className={`p-3 rounded-2xl ${isExpanded ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}>
                     <Zap size={24} />
                   </div>
@@ -577,6 +722,48 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
           );
         })}
       </div>
+
+      {/* QR Preview Modal */}
+      {showQRPreview && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                <div>
+                   <h3 className="text-xl font-extrabold text-slate-800">Print Preview</h3>
+                   <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">{previewQRs.length} Labels generated</p>
+                </div>
+                <button onClick={() => setShowQRPreview(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
+             </div>
+             
+             <div className="p-8 overflow-y-auto bg-slate-100 flex-1">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                   {previewQRs.map(qr => (
+                      <div key={qr.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center text-center">
+                         <img src={qr.dataUrl} alt="QR Code" className="w-32 h-32 object-contain" />
+                         <div className="mt-2 text-[10px] font-bold text-slate-700 leading-tight">{qr.name}</div>
+                         <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-1">{qr.substation}</div>
+                      </div>
+                   ))}
+                </div>
+             </div>
+             
+             <div className="p-6 border-t border-slate-100 flex justify-end gap-3 shrink-0">
+                <button 
+                   onClick={() => setShowQRPreview(false)}
+                   className="px-6 py-3 rounded-xl text-slate-600 font-bold hover:bg-slate-100 transition-colors"
+                >
+                   Cancel
+                </button>
+                <button 
+                   onClick={generateQRCodesPDF}
+                   className="px-6 py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                   <FileDown size={18} /> Download PDF for Print
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
