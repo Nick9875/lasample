@@ -133,7 +133,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
       return;
     }
 
-    if (window.confirm("WARNING: This will delete ALL equipment and measurement records permanently. User accounts and system settings will NOT be affected.\n\nAre you sure you want to proceed?")) {
+    if (window.confirm("WARNING: This will delete ALL equipment and measurement records permanently from the database. User accounts and system settings will NOT be affected.\n\nAre you sure you want to proceed?")) {
       setShowResetDataConfirmModal(true);
       setResetPasswordInput('');
       setResetPasswordError('');
@@ -146,7 +146,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
       return;
     }
 
-    if (window.confirm("WARNING: This will perform a FACTORY RESET. All equipment, measurement records, custom users, and settings will be permanently deleted and restored to initial defaults.\n\nAre you absolutely sure you want to proceed?")) {
+    if (window.confirm("WARNING: This will perform a FACTORY RESET. All equipment, measurement records, custom users, and settings will be permanently deleted from the database and restored to initial defaults.\n\nAre you absolutely sure you want to proceed?")) {
       setShowFactoryResetConfirmModal(true);
       setResetPasswordInput('');
       setResetPasswordError('');
@@ -155,12 +155,25 @@ const UserManagement: React.FC<UserManagementProps> = ({
   
   const confirmDataReset = async () => {
     if (resetPasswordInput.trim() === currentUser.password) {
-      await supabase.from('readings').delete().neq('id', '0');
-      await supabase.from('equipment').delete().neq('id', '0');
-      setEquipments([]);
-      setReadings([]);
-      alert("All equipment and measurement data has been successfully cleared.");
-      setShowResetDataConfirmModal(false);
+      try {
+        // 1. Delete Readings (Children) first to avoid orphan records if cascading isn't set
+        const { error: readingsError } = await supabase.from('readings').delete().neq('id', '0');
+        if (readingsError) throw readingsError;
+
+        // 2. Delete Equipment (Parents)
+        const { error: equipmentError } = await supabase.from('equipment').delete().neq('id', '0');
+        if (equipmentError) throw equipmentError;
+
+        // 3. Update Local State
+        setEquipments([]);
+        setReadings([]);
+        
+        alert("All equipment and measurement data has been successfully cleared from the database.");
+        setShowResetDataConfirmModal(false);
+      } catch (err: any) {
+        console.error("Reset Data Error:", err);
+        setResetPasswordError("Database Error: " + err.message);
+      }
     } else {
       setResetPasswordError("Incorrect password. Please try again.");
     }
@@ -168,23 +181,43 @@ const UserManagement: React.FC<UserManagementProps> = ({
 
   const confirmFactoryReset = async () => {
     if (resetPasswordInput.trim() === currentUser.password) {
-      await supabase.from('readings').delete().neq('id', '0');
-      await supabase.from('equipment').delete().neq('id', '0');
-      await supabase.from('user_accounts').delete().neq('id', '0');
-      await supabase.from('settings').upsert({ id: 1, poorLimit: 50, criticalLimit: 100 });
-      const { error } = await supabase.from('user_accounts').upsert(defaultAdmin);
+      try {
+        // 1. Clear Operational Data
+        const { error: rErr } = await supabase.from('readings').delete().neq('id', '0');
+        if (rErr) throw rErr;
 
-      if (error) {
-          alert("Reset partially failed: " + error.message);
+        const { error: eErr } = await supabase.from('equipment').delete().neq('id', '0');
+        if (eErr) throw eErr;
+
+        // 2. Reset Users (Keep Admin if ID 0, or recreate)
+        // Delete all users except ID 0 (if it exists)
+        const { error: uErr } = await supabase.from('user_accounts').delete().neq('id', '0'); 
+        if (uErr) throw uErr;
+
+        // Ensure default admin exists/is reset
+        const { error: adminErr } = await supabase.from('user_accounts').upsert(defaultAdmin);
+        if (adminErr) throw adminErr;
+
+        // 3. Reset Settings
+        const { error: sErr } = await supabase.from('settings').upsert({ id: 1, ...initialThreshold });
+        if (sErr) throw sErr;
+
+        // 4. Update Local State
+        setEquipments([]);
+        setReadings([]);
+        setSettings(initialThreshold);
+        setUsers([defaultAdmin]);
+        setCurrentUser(defaultAdmin);
+        
+        // 5. Reset Local Storage Session to default admin
+        localStorage.setItem('arrester_user', JSON.stringify(defaultAdmin));
+
+        alert("Factory reset complete. System restored to default state.");
+        setShowFactoryResetConfirmModal(false);
+      } catch (err: any) {
+        console.error("Factory Reset Error:", err);
+        setResetPasswordError("Reset Failed: " + err.message);
       }
-
-      setEquipments([]);
-      setReadings([]);
-      setSettings(initialThreshold);
-      setUsers([defaultAdmin]);
-      setCurrentUser(defaultAdmin);
-      alert("Factory reset complete. All data cleared and settings restored to default.");
-      setShowFactoryResetConfirmModal(false);
     } else {
       setResetPasswordError("Incorrect password. Please try again.");
     }
@@ -376,7 +409,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <h4 className="font-bold text-amber-800">Reset Measurement Data</h4>
-              <p className="text-xs text-amber-700 mt-1 mb-3">Permanently delete all equipment and reading records. User accounts and system settings will be preserved.</p>
+              <p className="text-xs text-amber-700 mt-1 mb-3">Permanently delete all equipment and reading records from Supabase. User accounts and system settings will be preserved.</p>
               <button
                 onClick={handleResetData}
                 className="w-full bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-amber-500/30 transition-all active:scale-95"
@@ -386,7 +419,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
             </div>
             <div className="bg-rose-50 border border-rose-200 rounded-xl p-4">
               <h4 className="font-bold text-rose-800">Factory Reset</h4>
-              <p className="text-xs text-rose-700 mt-1 mb-3">Delete ALL data including users, equipment, readings, and settings. Restores system to its initial state.</p>
+              <p className="text-xs text-rose-700 mt-1 mb-3">Delete ALL data including users, equipment, readings, and settings from Supabase. Restores system to its initial state.</p>
               <button
                 onClick={handleFactoryReset}
                 className="w-full bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-rose-500/30 transition-all active:scale-95"
@@ -407,7 +440,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
               <button onClick={() => setShowResetDataConfirmModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-sm text-slate-600">To confirm you want to delete all equipment and readings, please enter your administrator password. This action is irreversible.</p>
+              <p className="text-sm text-slate-600">To confirm you want to delete all equipment and readings from the database, please enter your administrator password. This action is irreversible.</p>
               {resetPasswordError && <div className="p-3 bg-red-500/20 border border-red-500/30 text-red-400 text-sm rounded-lg text-center font-medium">{resetPasswordError}</div>}
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Admin Password</label>
@@ -430,7 +463,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
               <button onClick={() => setShowFactoryResetConfirmModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} className="text-slate-400" /></button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-sm text-slate-600">To confirm the factory reset and delete all data, please enter your administrator password. This action is irreversible.</p>
+              <p className="text-sm text-slate-600">To confirm the factory reset and delete all data from the database, please enter your administrator password. This action is irreversible.</p>
               {resetPasswordError && <div className="p-3 bg-red-500/20 border border-red-500/30 text-red-400 text-sm rounded-lg text-center font-medium">{resetPasswordError}</div>}
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Admin Password</label>
