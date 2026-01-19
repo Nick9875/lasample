@@ -25,7 +25,9 @@ import {
   ShieldCheck,
   TrendingUp,
   Settings2,
-  ChevronDown
+  ChevronDown,
+  Filter,
+  ListPlus
 } from 'lucide-react';
 import { Equipment, Reading, ThresholdSettings, HealthStatus } from '../types';
 import { formatDisplayDate } from '../utils/reports';
@@ -54,6 +56,11 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null);
   const [activeResolutionId, setActiveResolutionId] = useState<string | null>(null);
   
+  // Sidebar State for Trend Analysis
+  const [trendSidebarSearch, setTrendSidebarSearch] = useState('');
+  const [trendSidebarSubstation, setTrendSidebarSubstation] = useState('All');
+  const [trendSidebarVoltage, setTrendSidebarVoltage] = useState('All');
+
   const [tableSearch, setTableSearch] = useState('');
   const [tableStatusFilter, setTableStatusFilter] = useState<HealthStatus | 'All' | 'At Risk'>('All');
   const [tableRatedKVFilter, setTableRatedKVFilter] = useState<number | 'All'>('All');
@@ -176,6 +183,19 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
       })
       .slice(0, 6);
   }, [dashboardData, tableSearch, tableStatusFilter, tableRatedKVFilter]);
+
+  // Sidebar Filtering Logic
+  const sidebarFilteredEquipments = useMemo(() => {
+    return equipments.filter(eq => {
+      const matchSearch = eq.name.toLowerCase().includes(trendSidebarSearch.toLowerCase());
+      const matchSubstation = trendSidebarSubstation === 'All' || eq.substation === trendSidebarSubstation;
+      const matchVoltage = trendSidebarVoltage === 'All' || eq.ratedVoltage === parseFloat(trendSidebarVoltage);
+      return matchSearch && matchSubstation && matchVoltage;
+    }).sort((a,b) => a.name.localeCompare(b.name));
+  }, [equipments, trendSidebarSearch, trendSidebarSubstation, trendSidebarVoltage]);
+
+  const substations = useMemo(() => ['All', ...Array.from(new Set(equipments.map(e => e.substation))).sort()], [equipments]);
+  const voltages = useMemo(() => ['All', ...Array.from(new Set(equipments.map(e => e.ratedVoltage))).sort((a: any, b: any) => a - b)], [equipments]);
 
   const toggleTrendSelection = (id: string) => {
     setSelectedTrendIds(prev => {
@@ -405,87 +425,157 @@ const Dashboard: React.FC<DashboardProps> = ({ equipments, setEquipments, readin
         </div>
       </div>
 
-      {/* Trend Analysis Chart */}
-      <div id="trend-analysis-section" className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-              <Activity className="text-blue-500" size={20} />
-              Trend Analysis
-            </h3>
-            <p className="text-xs text-slate-400 font-medium">
-              {selectedTrendIds.length > 0 
-                ? `Comparing ${selectedTrendIds.length} Asset(s)` 
-                : "Select assets from the table or alarms to view trends"}
-            </p>
-          </div>
+      {/* Trend Analysis Chart with Sidebar */}
+      <div id="trend-analysis-section" className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="flex flex-col lg:flex-row h-[500px]">
           
-          <div className="flex flex-wrap gap-2 bg-slate-50 p-1 rounded-xl">
-             <button 
-               onClick={() => setChartOptions({...chartOptions, showTotal: !chartOptions.showTotal})}
-               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showTotal ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               Total
-             </button>
-             <button 
-               onClick={() => setChartOptions({...chartOptions, showResistive: !chartOptions.showResistive})}
-               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showResistive ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               Resistive
-             </button>
-             <button 
-               onClick={() => setChartOptions({...chartOptions, showCorrected: !chartOptions.showCorrected})}
-               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showCorrected ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               Corrected
-             </button>
-          </div>
-        </div>
-
-        <div className="h-[350px] w-full">
-          {selectedTrendIds.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <ReLineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="date" tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} dy={10} />
-                <YAxis tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} width={30} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
-                  labelStyle={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px' }}
-                />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                
-                {selectedTrendIds.map((id, index) => {
-                  const eq = equipments.find(e => e.id === id);
-                  if (!eq) return null;
-                  // Generate deterministic colors based on index
-                  const colors = ['#2563eb', '#db2777', '#ca8a04', '#16a34a', '#9333ea', '#ea580c'];
-                  const baseColor = colors[index % colors.length];
-                  
-                  return (
-                    <React.Fragment key={id}>
-                      {chartOptions.showTotal && (
-                        <Line type="monotone" dataKey={`${eq.name}_total`} name={`${eq.name} (Total)`} stroke="#94a3b8" strokeDasharray="3 3" dot={false} strokeWidth={1} />
-                      )}
-                      {chartOptions.showResistive && (
-                        <Line type="monotone" dataKey={`${eq.name}_resistive`} name={`${eq.name} (Res)`} stroke={baseColor} strokeOpacity={0.4} dot={false} strokeWidth={1} />
-                      )}
-                      {chartOptions.showCorrected && (
-                        <Line type="monotone" dataKey={`${eq.name}_corrected`} name={`${eq.name} (Corr)`} stroke={baseColor} strokeWidth={3} dot={{ r: 3, fill: baseColor, strokeWidth: 0 }} activeDot={{ r: 6 }} />
-                      )}
-                    </React.Fragment>
-                  );
+          {/* Left Sidebar (25% width roughly) */}
+          <div className="w-full lg:w-72 border-b lg:border-b-0 lg:border-r border-slate-100 flex flex-col bg-slate-50/30">
+             <div className="p-4 border-b border-slate-100">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <ListPlus size={14} className="text-blue-500"/> Comparison List
+                </h4>
+                <div className="space-y-2">
+                   <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                      <input 
+                        type="text" 
+                        placeholder="Search..." 
+                        className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                        value={trendSidebarSearch}
+                        onChange={e => setTrendSidebarSearch(e.target.value)}
+                      />
+                   </div>
+                   <div className="flex gap-2">
+                      <select 
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold outline-none"
+                        value={trendSidebarSubstation}
+                        onChange={e => setTrendSidebarSubstation(e.target.value)}
+                      >
+                        <option value="All">All Subs</option>
+                        {substations.map(s => s !== 'All' && <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      <select 
+                        className="w-20 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold outline-none"
+                        value={trendSidebarVoltage}
+                        onChange={e => setTrendSidebarVoltage(e.target.value)}
+                      >
+                        <option value="All">kV</option>
+                        {voltages.map(v => v !== 'All' && <option key={v} value={v}>{v}</option>)}
+                      </select>
+                   </div>
+                </div>
+             </div>
+             
+             <div className="flex-1 overflow-y-auto no-scrollbar p-2 space-y-1">
+                {sidebarFilteredEquipments.map(eq => {
+                   const isSelected = selectedTrendIds.includes(eq.id);
+                   return (
+                     <button 
+                       key={eq.id}
+                       onClick={() => toggleTrendSelection(eq.id)}
+                       className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all flex items-center justify-between group ${isSelected ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-100 text-slate-600'}`}
+                     >
+                        <div className="truncate pr-2">
+                           <div className={`font-bold truncate ${isSelected ? 'text-white' : 'text-slate-700'}`}>{eq.name}</div>
+                           <div className={`text-[9px] uppercase tracking-tighter ${isSelected ? 'text-blue-200' : 'text-slate-400'}`}>{eq.substation}</div>
+                        </div>
+                        {isSelected && <CheckCircle2 size={14} className="shrink-0 text-white" />}
+                     </button>
+                   );
                 })}
-              </ReLineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-slate-300">
-               <Activity size={48} className="mb-2 opacity-50" />
-               <p className="text-sm font-bold">No assets selected for analysis</p>
-               <p className="text-xs">Click asset names in the table below to add them to this chart</p>
+                {sidebarFilteredEquipments.length === 0 && (
+                   <div className="text-center py-8 text-slate-400 text-xs italic">No equipment found</div>
+                )}
+             </div>
+             <div className="p-2 border-t border-slate-100 text-[10px] text-center text-slate-400 font-bold uppercase">
+                {selectedTrendIds.length} / 9 Selected
+             </div>
+          </div>
+
+          {/* Right Chart Area */}
+          <div className="flex-1 p-6 flex flex-col min-w-0">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 shrink-0">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <Activity className="text-blue-500" size={20} />
+                  Trend Analysis
+                </h3>
+                <p className="text-xs text-slate-400 font-medium">
+                  {selectedTrendIds.length > 0 
+                    ? `Comparing ${selectedTrendIds.length} Asset(s)` 
+                    : "Select assets from the list or alarms to view trends"}
+                </p>
+              </div>
+              
+              <div className="flex flex-wrap gap-2 bg-slate-50 p-1 rounded-xl">
+                 <button 
+                   onClick={() => setChartOptions({...chartOptions, showTotal: !chartOptions.showTotal})}
+                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showTotal ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                 >
+                   Total
+                 </button>
+                 <button 
+                   onClick={() => setChartOptions({...chartOptions, showResistive: !chartOptions.showResistive})}
+                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showResistive ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                 >
+                   Resistive
+                 </button>
+                 <button 
+                   onClick={() => setChartOptions({...chartOptions, showCorrected: !chartOptions.showCorrected})}
+                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${chartOptions.showCorrected ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                 >
+                   Corrected
+                 </button>
+              </div>
             </div>
-          )}
+
+            <div className="flex-1 w-full min-h-0">
+              {selectedTrendIds.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <ReLineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} dy={10} />
+                    <YAxis tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} width={30} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                      itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
+                      labelStyle={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px' }}
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                    
+                    {selectedTrendIds.map((id, index) => {
+                      const eq = equipments.find(e => e.id === id);
+                      if (!eq) return null;
+                      // Generate deterministic colors based on index
+                      const colors = ['#2563eb', '#db2777', '#ca8a04', '#16a34a', '#9333ea', '#ea580c'];
+                      const baseColor = colors[index % colors.length];
+                      
+                      return (
+                        <React.Fragment key={id}>
+                          {chartOptions.showTotal && (
+                            <Line type="monotone" dataKey={`${eq.name}_total`} name={`${eq.name} (Total)`} stroke="#94a3b8" strokeDasharray="3 3" dot={false} strokeWidth={1} />
+                          )}
+                          {chartOptions.showResistive && (
+                            <Line type="monotone" dataKey={`${eq.name}_resistive`} name={`${eq.name} (Res)`} stroke={baseColor} strokeOpacity={0.4} dot={false} strokeWidth={1} />
+                          )}
+                          {chartOptions.showCorrected && (
+                            <Line type="monotone" dataKey={`${eq.name}_corrected`} name={`${eq.name} (Corr)`} stroke={baseColor} strokeWidth={3} dot={{ r: 3, fill: baseColor, strokeWidth: 0 }} activeDot={{ r: 6 }} />
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </ReLineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-slate-300">
+                   <Activity size={48} className="mb-2 opacity-50" />
+                   <p className="text-sm font-bold">No assets selected for analysis</p>
+                   <p className="text-xs">Click asset names in the list to add them to this chart</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
