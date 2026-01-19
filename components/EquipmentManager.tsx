@@ -75,10 +75,14 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
        const eq = equipments.find(e => e.id === initialEditId);
        if (eq) {
          setExpandedId(initialEditId);
-         // Optional: scroll into view logic could go here
+         // If user has write access, automatically open the edit modal for the scanned item
+         if (isAdmin) {
+            setCurrentEquipment(eq);
+            setIsEditing(true);
+         }
        }
     }
-  }, [initialEditId, equipments]);
+  }, [initialEditId, equipments, isAdmin]);
 
   useEffect(() => {
     if (currentEquipment.ratedVoltage !== undefined) {
