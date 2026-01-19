@@ -360,7 +360,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
                             <th className="px-2 py-3 text-center">Resistive (uA)</th>
                             <th className="px-2 py-3 text-center font-bold text-blue-600">Corrected (uA)</th>
                             <th className="px-3 py-3 text-center">Status</th> 
-                            <th className="px-3 py-3 text-left">Notes</th>
+                            <th className="px-3 py-3 text-left">Notes / User</th>
                             <th className="px-3 py-3 text-right">Actions</th>
                           </tr>
                         </thead>
@@ -409,11 +409,18 @@ const HistoryView: React.FC<HistoryViewProps> = ({ readings, setReadings, equipm
                                   {isEditing ? (
                                     <input type="text" className="w-full bg-white border rounded px-1 text-[10px]" value={tempData.notes || ''} onChange={e => setTempData({...tempData, notes: e.target.value})} placeholder="Notes" />
                                   ) : (
-                                    r.notes && (
-                                      <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500 bg-slate-50 px-2 py-1 rounded border border-slate-100">
-                                        {r.notes}
-                                      </div>
-                                    )
+                                    <>
+                                      {r.notes && (
+                                        <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500 bg-slate-50 px-2 py-1 rounded border border-slate-100 mb-1">
+                                          {r.notes}
+                                        </div>
+                                      )}
+                                      {r.recordedBy && (
+                                        <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                                          Rec: {r.recordedBy}
+                                        </div>
+                                      )}
+                                    </>
                                   )}
                                 </td>
                                 <td className="px-3 py-3 text-right">

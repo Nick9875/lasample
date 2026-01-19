@@ -32,6 +32,7 @@ export interface Reading {
   mcovRating: number;
   ratedVoltage: number; // numerical L-L kV
   notes?: string;
+  recordedBy?: string;
 }
 
 export interface ThresholdSettings {

@@ -1,11 +1,11 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2, QrCode } from 'lucide-react';
-import { Equipment, Reading } from '../types';
+import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2, QrCode, ShieldAlert } from 'lucide-react';
+import { Equipment, Reading, UserAccount } from '../types';
 import { parseInputDate } from '../utils/reports';
 import * as XLSX from 'xlsx';
 import { supabase } from '../services/supabaseClient';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 
 interface DataEntryProps {
   equipments: Equipment[];
@@ -13,9 +13,10 @@ interface DataEntryProps {
   addReading: (r: Reading) => void;
   setReadings: React.Dispatch<React.SetStateAction<Reading[]>>;
   isAdmin: boolean;
+  currentUser: UserAccount;
 }
 
-const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addReading, setReadings, isAdmin }) => {
+const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addReading, setReadings, isAdmin, currentUser }) => {
   const [activeTab, setActiveTab] = useState<'individual' | 'bulk'>('individual');
   const [filterDistrict, setFilterDistrict] = useState('');
   const [filterSubstation, setFilterSubstation] = useState('');
@@ -43,41 +44,55 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
   });
 
   const [showScanner, setShowScanner] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
 
   useEffect(() => {
-    let scanner: Html5QrcodeScanner | null = null;
+    let html5QrCode: Html5Qrcode | null = null;
+    
     if (showScanner) {
-      scanner = new Html5QrcodeScanner(
-        "reader", 
-        { 
-          fps: 10, 
-          qrbox: { width: 250, height: 250 },
-          videoConstraints: { facingMode: "environment" } 
-        }, 
-        /* verbose= */ false
-      );
-      scanner.render((decodedText) => {
-        // Success callback
-        // The QR code contains the equipment ID
-        const eq = equipments.find(e => e.id === decodedText);
-        if (eq) {
-            setFormData(prev => ({ ...prev, equipmentId: eq.id }));
-            setShowScanner(false);
-            scanner?.clear();
-        } else {
-            alert(`Equipment ID not found: ${decodedText}`);
-            // Optional: Keep scanner open to try again
-        }
-      }, (errorMessage) => {
-        // Error callback (ignore for scanning in progress)
-      });
-    }
+      setScannerError(null);
+      // Delay initialization to ensure DOM is ready
+      const timer = setTimeout(() => {
+        const elementId = "reader";
+        if (!document.getElementById(elementId)) return;
 
-    return () => {
-        if (scanner) {
-            scanner.clear().catch(error => console.error("Failed to clear scanner", error));
+        html5QrCode = new Html5Qrcode(elementId);
+        
+        html5QrCode.start(
+          { facingMode: "environment" }, // Prefer rear camera
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+          },
+          (decodedText) => {
+            // Success
+            const eq = equipments.find(e => e.id === decodedText);
+            if (eq) {
+                setFormData(prev => ({ ...prev, equipmentId: eq.id }));
+                setShowScanner(false);
+                html5QrCode?.stop().catch(console.error);
+            } else {
+                alert(`Equipment ID not found: ${decodedText}`);
+                // Optional: Keep scanner open to try again
+            }
+          },
+          (errorMessage) => {
+            // Ignore parse errors
+          }
+        ).catch((err) => {
+          console.error("Error starting scanner:", err);
+          setScannerError("Camera access failed. Check permissions.");
+        });
+      }, 300);
+
+      return () => {
+        clearTimeout(timer);
+        if (html5QrCode && html5QrCode.isScanning) {
+          html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error);
         }
-    };
+      };
+    }
   }, [showScanner, equipments]);
 
 
@@ -113,6 +128,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
       correctedResistiveCurrent: parseFloat(formData.correctedResistiveCurrent) || 0,
       mcovRating: eq.mcovRating,
       ratedVoltage: eq.ratedVoltage || 0,
+      recordedBy: currentUser.username,
     };
 
     let syncSuccess = false;
@@ -153,6 +169,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
           correctedResistiveCurrent: parseFloat(vals.corrected) || 0,
           mcovRating: eq.mcovRating,
           ratedVoltage: eq.ratedVoltage || 0,
+          recordedBy: currentUser.username,
         });
       }
     });
@@ -323,6 +340,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
             correctedResistiveCurrent: parseFloat(row['Corrected (uA)'] || row['Corrected'] || 0),
             mcovRating: eq.mcovRating,
             ratedVoltage: eq.ratedVoltage,
+            recordedBy: currentUser.username,
           });
           successCount++;
         });
@@ -638,14 +656,27 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
 
       {showScanner && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[130] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-             <div className="p-4 bg-slate-800 text-white flex justify-between items-center">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
+             <div className="p-4 bg-slate-800 text-white flex justify-between items-center relative z-20">
                 <h3 className="font-bold flex items-center gap-2"><QrCode size={18} /> Scan Equipment QR</h3>
                 <button onClick={() => setShowScanner(false)} className="p-1 hover:bg-slate-700 rounded"><X size={20} /></button>
              </div>
-             <div className="p-4 bg-black">
-                <div id="reader" className="w-full h-64 bg-slate-900"></div>
-                <p className="text-center text-xs text-slate-400 mt-2">Align QR code within the frame</p>
+             <div className="p-4 bg-black relative">
+                <div id="reader" className="w-full h-72 bg-slate-900 rounded overflow-hidden"></div>
+                
+                {scannerError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 z-10 p-6 text-center">
+                    <div>
+                      <ShieldAlert className="mx-auto text-rose-500 mb-2" size={32} />
+                      <p className="text-white text-sm font-bold mb-1">Camera Access Error</p>
+                      <p className="text-slate-400 text-xs">{scannerError}</p>
+                    </div>
+                  </div>
+                )}
+
+                {!scannerError && (
+                  <p className="text-center text-xs text-slate-400 mt-2 absolute bottom-2 left-0 right-0 z-10 pointer-events-none">Align QR code within the frame</p>
+                )}
              </div>
           </div>
         </div>

@@ -33,7 +33,7 @@ import SettingsView from './components/SettingsView';
 import ReportsView from './components/ReportsView';
 import UserManagement from './components/UserManagement';
 import { supabase } from './services/supabaseClient';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 
 const INITIAL_THRESHOLD: ThresholdSettings = {
   poorLimit: 300,
@@ -76,9 +76,11 @@ const App: React.FC = () => {
   const [showGlobalScanner, setShowGlobalScanner] = useState(false);
   const [scannedEquipmentId, setScannedEquipmentId] = useState<string | null>(null);
   const [showActionModal, setShowActionModal] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
   
   // Navigation props
   const [targetEquipmentId, setTargetEquipmentId] = useState<string | null>(null);
+  const [dashboardFilter, setDashboardFilter] = useState<'All' | 'At Risk'>('All');
 
   // Load Data from Supabase & Setup Realtime Subscriptions
   useEffect(() => {
@@ -191,34 +193,53 @@ const App: React.FC = () => {
 
   // Global Scanner Effect
   useEffect(() => {
-    let scanner: Html5QrcodeScanner | null = null;
+    let html5QrCode: Html5Qrcode | null = null;
+    
     if (showGlobalScanner) {
-      scanner = new Html5QrcodeScanner(
-        "global-reader", 
-        { 
-          fps: 10, 
-          qrbox: { width: 250, height: 250 },
-          videoConstraints: { facingMode: "environment" } 
-        }, 
-        /* verbose= */ false
-      );
-      scanner.render((decodedText) => {
-        const eq = equipments.find(e => e.id === decodedText);
-        if (eq) {
-          setScannedEquipmentId(eq.id);
-          setShowGlobalScanner(false);
-          setShowActionModal(true);
-          scanner?.clear();
-        } else {
-          alert("Equipment ID not found in inventory.");
+      setScannerError(null);
+      // Small delay to ensure modal DOM is ready
+      const timer = setTimeout(() => {
+        const elementId = "global-reader";
+        if (!document.getElementById(elementId)) return;
+
+        html5QrCode = new Html5Qrcode(elementId);
+        
+        html5QrCode.start(
+          { facingMode: "environment" }, // Prefer rear camera
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+          },
+          (decodedText) => {
+            // Success
+            const eq = equipments.find(e => e.id === decodedText);
+            if (eq) {
+              setScannedEquipmentId(eq.id);
+              setShowGlobalScanner(false);
+              setShowActionModal(true);
+              html5QrCode?.stop().catch(console.error);
+            } else {
+              // Could add a toast here for invalid code
+              console.warn("Unknown code:", decodedText);
+            }
+          },
+          (errorMessage) => {
+            // Ignore frame parse errors
+          }
+        ).catch((err) => {
+          console.error("Error starting scanner:", err);
+          setScannerError("Camera access failed. Please ensure permissions are granted and you are using HTTPS.");
+        });
+      }, 300);
+
+      return () => {
+        clearTimeout(timer);
+        if (html5QrCode && html5QrCode.isScanning) {
+          html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error);
         }
-      }, (errorMessage) => {
-        // ignore errors during scanning
-      });
+      };
     }
-    return () => {
-      if (scanner) scanner.clear().catch(console.error);
-    };
   }, [showGlobalScanner, equipments]);
 
 
@@ -477,7 +498,10 @@ const App: React.FC = () => {
             </button>
             
             <div className="flex flex-col">
-              <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-400 mb-1">
+              <div 
+                onClick={() => { setCurrentView('dashboard'); setDashboardFilter('All'); }}
+                className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-400 mb-1 cursor-pointer hover:text-blue-600 transition-colors"
+              >
                  <Activity size={12} /> System Health Monitor
               </div>
               <div className="flex items-center gap-3">
@@ -504,8 +528,11 @@ const App: React.FC = () => {
               <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wide">Assets:</span>
               <span className="font-bold text-slate-900">{globalHealthStats.totalAssets}</span>
             </div>
-            <div className={`bg-white border p-2 rounded-xl flex items-center gap-2 text-xs font-medium 
-                          ${globalHealthStats.atRisk > 0 ? 'border-rose-300 text-rose-700 shadow-sm' : 'border-emerald-200 text-emerald-700 shadow-sm'}`}>
+            <div 
+              onClick={() => { setCurrentView('dashboard'); setDashboardFilter('At Risk'); }}
+              className={`bg-white border p-2 rounded-xl flex items-center gap-2 text-xs font-medium cursor-pointer transition-all active:scale-95
+                          ${globalHealthStats.atRisk > 0 ? 'border-rose-300 text-rose-700 shadow-sm hover:bg-rose-50' : 'border-emerald-200 text-emerald-700 shadow-sm hover:bg-emerald-50'}`}
+            >
               {globalHealthStats.atRisk > 0 ? (
                 <>
                   <AlertCircle size={16} className="text-rose-500" />
@@ -534,6 +561,7 @@ const App: React.FC = () => {
                 searchTerm={''} 
                 isAdmin={hasWriteAccess}
                 initialTargetId={targetEquipmentId}
+                initialStatusFilter={dashboardFilter}
               />
             )}
             {currentView === 'equipment' && (
@@ -544,6 +572,7 @@ const App: React.FC = () => {
                 setReadings={setReadings}
                 isAdmin={hasWriteAccess} 
                 initialEditId={targetEquipmentId}
+                currentUser={currentUser}
               />
             )}
             {currentView === 'readings' && (
@@ -553,6 +582,7 @@ const App: React.FC = () => {
                 addReading={(r) => setReadings(prev => [r, ...prev])} 
                 setReadings={setReadings}
                 isAdmin={hasWriteAccess}
+                currentUser={currentUser}
               />
             )}
             {currentView === 'history' && (
@@ -613,14 +643,27 @@ const App: React.FC = () => {
       {/* Global QR Scanner Modal */}
       {showGlobalScanner && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-             <div className="p-4 bg-slate-800 text-white flex justify-between items-center">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
+             <div className="p-4 bg-slate-800 text-white flex justify-between items-center relative z-20">
                 <h3 className="font-bold flex items-center gap-2"><QrCode size={18} /> Scan Asset Tag</h3>
                 <button onClick={() => setShowGlobalScanner(false)} className="p-1 hover:bg-slate-700 rounded"><X size={20} /></button>
              </div>
-             <div className="p-4 bg-black">
-                <div id="global-reader" className="w-full h-64 bg-slate-900"></div>
-                <p className="text-center text-xs text-slate-400 mt-2">Align QR code within the frame</p>
+             <div className="p-4 bg-black relative">
+                <div id="global-reader" className="w-full h-72 bg-slate-900 rounded overflow-hidden"></div>
+                
+                {scannerError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 z-10 p-6 text-center">
+                    <div>
+                      <ShieldAlert className="mx-auto text-rose-500 mb-2" size={32} />
+                      <p className="text-white text-sm font-bold mb-1">Camera Access Error</p>
+                      <p className="text-slate-400 text-xs">{scannerError}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {!scannerError && (
+                  <p className="text-center text-xs text-slate-400 mt-2 absolute bottom-2 left-0 right-0 z-10 pointer-events-none">Align QR code within the frame</p>
+                )}
              </div>
           </div>
         </div>

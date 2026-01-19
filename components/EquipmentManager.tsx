@@ -21,7 +21,7 @@ import {
   Printer,
   FileDown
 } from 'lucide-react';
-import { Equipment, Reading, HealthStatus } from '../types';
+import { Equipment, Reading, HealthStatus, UserAccount } from '../types';
 import { formatDisplayDate } from '../utils/reports';
 import { supabase } from '../services/supabaseClient';
 import QRCode from 'qrcode';
@@ -34,9 +34,10 @@ interface EquipmentManagerProps {
   setReadings: React.Dispatch<React.SetStateAction<Reading[]>>;
   isAdmin: boolean;
   initialEditId?: string | null;
+  currentUser: UserAccount;
 }
 
-const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEquipments, readings, setReadings, isAdmin, initialEditId }) => {
+const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEquipments, readings, setReadings, isAdmin, initialEditId, currentUser }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentEquipment, setCurrentEquipment] = useState<Partial<Equipment>>({});
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
@@ -240,7 +241,8 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
       resistiveCurrent: parseFloat(newReadingData.resistive),
       correctedResistiveCurrent: parseFloat(newReadingData.corrected),
       mcovRating: eq.mcovRating,
-      ratedVoltage: eq.ratedVoltage
+      ratedVoltage: eq.ratedVoltage,
+      recordedBy: currentUser.username,
     };
 
     const { error } = await supabase.from('readings').insert(reading);
@@ -654,6 +656,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                           <th className="px-2 py-3 text-center">Total (uA)</th>
                           <th className="px-2 py-3 text-center">Resistive (uA)</th>
                           <th className="px-2 py-3 text-center font-bold text-blue-600">Corrected (uA)</th>
+                          <th className="px-3 py-3 text-left">Notes / User</th>
                           <th className="px-3 py-3 text-right">Actions</th>
                         </tr>
                       </thead>
@@ -692,6 +695,13 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                                   <input type="number" className="w-16 text-center bg-white border rounded font-bold text-blue-600" value={tempReadingData.correctedResistiveCurrent || ''} onChange={e => setTempReadingData({...tempReadingData, correctedResistiveCurrent: parseFloat(e.target.value)})} />
                                 ) : r.correctedResistiveCurrent}
                               </td>
+                              <td className="px-3 py-3 text-left">
+                                {r.recordedBy && (
+                                  <span className="text-[9px] text-slate-400 font-bold bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                                    {r.recordedBy}
+                                  </span>
+                                )}
+                              </td>
                               <td className="px-3 py-3 text-right">
                                 {isEditingReading ? (
                                   <div className="flex justify-end gap-1">
@@ -710,7 +720,7 @@ const EquipmentManager: React.FC<EquipmentManagerProps> = ({ equipments, setEqui
                         })}
                         {filteredEqReadings.length === 0 && (
                           <tr>
-                            <td colSpan={7} className="py-10 text-center text-slate-400 italic">No measurement history found for this child asset.</td>
+                            <td colSpan={8} className="py-10 text-center text-slate-400 italic">No measurement history found for this child asset.</td>
                           </tr>
                         )}
                       </tbody>
