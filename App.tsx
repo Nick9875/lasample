@@ -195,7 +195,11 @@ const App: React.FC = () => {
     if (showGlobalScanner) {
       scanner = new Html5QrcodeScanner(
         "global-reader", 
-        { fps: 10, qrbox: { width: 250, height: 250 } }, 
+        { 
+          fps: 10, 
+          qrbox: { width: 250, height: 250 },
+          videoConstraints: { facingMode: "environment" } 
+        }, 
         /* verbose= */ false
       );
       scanner.render((decodedText) => {
@@ -209,7 +213,7 @@ const App: React.FC = () => {
           alert("Equipment ID not found in inventory.");
         }
       }, (errorMessage) => {
-        // ignore errors
+        // ignore errors during scanning
       });
     }
     return () => {

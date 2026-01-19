@@ -49,7 +49,11 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
     if (showScanner) {
       scanner = new Html5QrcodeScanner(
         "reader", 
-        { fps: 10, qrbox: { width: 250, height: 250 } }, 
+        { 
+          fps: 10, 
+          qrbox: { width: 250, height: 250 },
+          videoConstraints: { facingMode: "environment" } 
+        }, 
         /* verbose= */ false
       );
       scanner.render((decodedText) => {
