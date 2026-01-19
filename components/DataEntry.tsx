@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Save, Zap, ListPlus, CheckCircle2, Clipboard, X, Upload, FileSpreadsheet, Activity, Trash2, QrCode, ShieldAlert } from 'lucide-react';
 import { Equipment, Reading, UserAccount } from '../types';
@@ -182,8 +183,13 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
 
     let syncSuccess = false;
     try {
-        const { error } = await supabase.from('readings').insert(batchReadings);
-        if (error) throw error;
+        // Chunk uploads to avoid payload limits
+        const chunkSize = 50;
+        for (let i = 0; i < batchReadings.length; i += chunkSize) {
+            const chunk = batchReadings.slice(i, i + chunkSize);
+            const { error } = await supabase.from('readings').insert(chunk);
+            if (error) throw error;
+        }
         syncSuccess = true;
     } catch (error: any) {
         console.warn("Cloud sync failed:", error);
@@ -294,6 +300,9 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
 
         const newReadings: Reading[] = [];
         let updatedEquipments = [...equipments];
+        // Track unique equipments that need to be upserted (new or modified)
+        const equipmentsToUpsert = new Map<string, Equipment>(); 
+        
         let successCount = 0;
         let newAssetsCount = 0;
 
@@ -326,19 +335,37 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
               statusOverride: null
             };
             updatedEquipments.push(eq);
+            equipmentsToUpsert.set(eq.id, eq); // Mark for upsert
             newAssetsCount++;
           } else {
             eq = { ...updatedEquipments[eqIndex] };
-            if (row['District']) eq.district = row['District'].toString().trim();
-            if (row['Brand']) eq.brand = row['Brand'].toString().trim();
-            if (row['Model']) eq.model = row['Model'].toString().trim();
-            if (row['Rated kV'] || row['Rated (kV)'] || row['Rated']) {
+            let modified = false;
+            
+            if (row['District'] && eq.district !== row['District'].toString().trim()) {
+                eq.district = row['District'].toString().trim();
+                modified = true;
+            }
+            if (row['Brand'] && eq.brand !== row['Brand'].toString().trim()) {
+                eq.brand = row['Brand'].toString().trim();
+                modified = true;
+            }
+            if (row['Model'] && eq.model !== row['Model'].toString().trim()) {
+                eq.model = row['Model'].toString().trim();
+                modified = true;
+            }
+            if ((row['Rated kV'] || row['Rated (kV)'] || row['Rated']) && eq.ratedVoltage !== parseFloat(row['Rated kV'] || row['Rated (kV)'] || row['Rated'])) {
                 eq.ratedVoltage = parseFloat(row['Rated kV'] || row['Rated (kV)'] || row['Rated']);
+                modified = true;
             }
-            if (row['MCOV Rating'] || row['MCOV'] || row['MCOV (kV)']) {
+            if ((row['MCOV Rating'] || row['MCOV'] || row['MCOV (kV)']) && eq.mcovRating !== parseFloat(row['MCOV Rating'] || row['MCOV'] || row['MCOV (kV)'])) {
                 eq.mcovRating = parseFloat(row['MCOV Rating'] || row['MCOV'] || row['MCOV (kV)']);
+                modified = true;
             }
+            
             updatedEquipments[eqIndex] = eq;
+            if (modified) {
+                equipmentsToUpsert.set(eq.id, eq); // Mark for upsert
+            }
           }
 
           newReadings.push({
@@ -359,13 +386,20 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
         if (successCount > 0) {
            let syncMsg = "Synchronized with database.";
            try {
-               // Bulk Upsert Equipment
-               const { error: eqError } = await supabase.from('equipment').upsert(updatedEquipments);
-               if (eqError) throw eqError;
+               // 1. Bulk Upsert Equipment (only changed ones)
+               if (equipmentsToUpsert.size > 0) {
+                   const { error: eqError } = await supabase.from('equipment').upsert(Array.from(equipmentsToUpsert.values()));
+                   if (eqError) throw eqError;
+               }
 
-               // Bulk Insert Readings
-               const { error: rdError } = await supabase.from('readings').insert(newReadings);
-               if (rdError) throw rdError;
+               // 2. Bulk Insert Readings (Chunked)
+               const chunkSize = 100;
+               for (let i = 0; i < newReadings.length; i += chunkSize) {
+                   const chunk = newReadings.slice(i, i + chunkSize);
+                   const { error: rdError } = await supabase.from('readings').insert(chunk);
+                   if (rdError) throw rdError;
+               }
+
            } catch (err: any) {
                console.warn("Cloud sync failed:", err);
                syncMsg = "Cloud sync failed (Offline Mode). Data stored locally.";
@@ -373,7 +407,7 @@ const DataEntry: React.FC<DataEntryProps> = ({ equipments, setEquipments, addRea
 
           setEquipments(updatedEquipments);
           setReadings(prev => [...newReadings, ...prev]);
-          alert(`Integration Complete (${syncMsg}):\n- Added ${successCount} measurement records.\n- Processed ${updatedEquipments.length} inventory items.`);
+          alert(`Integration Complete (${syncMsg}):\n- Added ${successCount} measurement records.\n- Processed/Updated ${equipmentsToUpsert.size} inventory items.`);
         } else {
           alert("No valid data found in the spreadsheet. Please verify columns.");
         }
