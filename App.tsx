@@ -20,7 +20,9 @@ import {
   X,
   ArrowRight,
   Edit,
-  BarChart3
+  BarChart3,
+  Maximize,
+  Minimize
 } from 'lucide-react';
 import { Equipment, Reading, UserAccount, ThresholdSettings, View, HealthStatus, GlobalHealthStats } from './types';
 import Dashboard from './components/Dashboard';
@@ -77,6 +79,9 @@ const App: React.FC = () => {
   const [showActionModal, setShowActionModal] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
   
+  // Full Screen State
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
   // Navigation props
   const [targetEquipmentId, setTargetEquipmentId] = useState<string | null>(null);
   const [dashboardFilter, setDashboardFilter] = useState<'All' | 'At Risk'>('All');
@@ -240,6 +245,27 @@ const App: React.FC = () => {
       };
     }
   }, [showGlobalScanner, equipments]);
+
+  // Full Screen Listeners
+  useEffect(() => {
+    const handleFullScreenChange = () => {
+      setIsFullScreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullScreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
+  }, []);
+
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  };
 
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
@@ -522,6 +548,14 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4 ml-auto">
+            <button 
+              onClick={toggleFullScreen}
+              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title={isFullScreen ? "Exit Full Screen" : "Enter Full Screen"}
+            >
+              {isFullScreen ? <Minimize size={20} /> : <Maximize size={20} />}
+            </button>
+
             <div className="flex bg-slate-100 p-2 rounded-xl items-center gap-2 text-xs font-medium text-slate-700">
               <Database size={14} className="text-slate-500"/>
               <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wide">Assets:</span>
